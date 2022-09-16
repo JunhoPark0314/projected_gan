@@ -12,7 +12,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from torch_utils import training_stats
-from torch_utils.ops import upfirdn2d
+from torch_utils.ops import upfirdn2d, conv2d_gradfix
 
 
 class Loss:
@@ -127,11 +127,12 @@ class ProjectedPairedGANLoss(Loss):
     def accumulate_gradients(self, phase, real_img, real_c, gen_z, gen_c, gain, cur_nimg):
         assert phase in ['Gmain', 'Greg', 'Gboth', 'Dmain', 'Dreg', 'Dboth']
         do_Gmain = (phase in ['Gmain', 'Gboth'])
-        do_Dmain = (phase in ['Dmain', 'Dboth'])
-        if phase in ['Dreg', 'Greg']: return  # no regularization needed for PG
+        do_Dmain = (phase in ['Dmain', 'Dboth' , 'Dreg'])
+        # if phase in ['Dreg', 'Greg']: return  # no regularization needed for PG
 
         # blurring schedule
         blur_sigma = max(1 - cur_nimg / (self.blur_fade_kimg * 1e3), 0) * self.blur_init_sigma if self.blur_fade_kimg > 1 else 0
+        warmup = 0 if cur_nimg < 100000 else 1
         next_t, prev_t = self.diffusion.sample_time(real_img)
         a_next, a_prev, next_xt, prev_xt, prev_x0, next_x0 = self.diffusion.sample_noised_pair(real_img, next_t, prev_t, self.netTrg)
 
@@ -143,7 +144,7 @@ class ProjectedPairedGANLoss(Loss):
                 # next_xt_gen = self.diffusion.gen_noised(next_x0_gen, a_prev, a_next, prev_xt)
                 gen_logits, gen_logits_naive = self.run_D(prev_x0, next_x0_gen, prev_t, next_t, blur_sigma=blur_sigma)
                 # loss_Grec = (next_x0_gen - real_img).square().mean() * 0
-                loss_Gmain = (-gen_logits).mean()
+                loss_Gmain = (-gen_logits).mean() * warmup
                 loss_Gnaive = torch.nn.functional.softplus(-gen_logits_naive).mean()
 
                 # Logging
@@ -164,7 +165,7 @@ class ProjectedPairedGANLoss(Loss):
                 next_x0_gen = self.run_G(prev_x0, prev_t, gen_z, update_emas=True)
                 # next_xt_gen = self.diffusion.gen_noised(next_x0_gen, a_prev, a_next, prev_xt)
                 gen_logits, gen_logits_naive = self.run_D(prev_x0, next_x0_gen, prev_t, next_t, blur_sigma=blur_sigma)
-                loss_Dgen = (F.relu(torch.ones_like(gen_logits) + gen_logits)).mean()
+                loss_Dgen = (F.relu(torch.ones_like(gen_logits) + gen_logits)).mean() * warmup
                 loss_Dgen_naive = torch.nn.functional.softplus(gen_logits_naive).mean()
 
                 # Logging
@@ -176,18 +177,30 @@ class ProjectedPairedGANLoss(Loss):
 
             # Dmain: Maximize logits for real images.
             with torch.autograd.profiler.record_function('Dreal_forward'):
-                next_x_tmp = next_x0.detach().requires_grad_(False)
+                next_x_tmp = next_x0.detach().requires_grad_(True)
                 real_logits, real_logits_naive = self.run_D(prev_x0, next_x_tmp, prev_t, next_t, blur_sigma=blur_sigma)
-                loss_Dreal = (F.relu(torch.ones_like(real_logits) - real_logits)).mean()
-                loss_Dreal_naive = torch.nn.functional.softplus(real_logits_naive).mean()
 
-                # Logging
-                training_stats.report('Loss/scores/real', real_logits)
-                training_stats.report('Loss/signs/real', real_logits.sign())
-                training_stats.report('Loss/D/loss', loss_Dgen + loss_Dreal)
-                training_stats.report('Loss/D/loss_naive', loss_Dgen_naive + loss_Dreal_naive)
+                loss_Dreal = 0
+                loss_Dreal_naive = 0
+                if phase in ['Dmain', 'Dboth']:
+                    loss_Dreal = (F.relu(torch.ones_like(real_logits) - real_logits)).mean() * warmup
+                    loss_Dreal_naive = torch.nn.functional.softplus(real_logits_naive).mean()
+                    # Logging
+                    training_stats.report('Loss/scores/real', real_logits)
+                    training_stats.report('Loss/signs/real', real_logits.sign())
+                    training_stats.report('Loss/D/loss', loss_Dgen + loss_Dreal)
+                    training_stats.report('Loss/D/loss_naive', loss_Dgen_naive + loss_Dreal_naive)
+
+                loss_Dr1 = 0
+                if phase in ['Dreg', 'Dboth']:
+                    with torch.autograd.profiler.record_function('r1_grads'), conv2d_gradfix.no_weight_gradients():
+                        r1_grads = torch.autograd.grad(outputs=[real_logits.sum()], inputs=[next_x_tmp], create_graph=True, only_inputs=True)[0]
+                    r1_penalty = r1_grads.square().sum([1,2,3])
+                    loss_Dr1 = r1_penalty * (self.r1_gamma / 2)
+                    training_stats.report('Loss/r1_penalty', r1_penalty)
+                    training_stats.report('Loss/D/reg', loss_Dr1)
 
             with torch.autograd.profiler.record_function('Dreal_backward'):
-                (loss_Dreal + loss_Dreal_naive).backward()
+                (loss_Dreal + loss_Dreal_naive + loss_Dr1).backward()
             
 
