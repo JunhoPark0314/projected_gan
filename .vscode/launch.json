@@ -1,0 +1,39 @@
+{
+	// Use IntelliSense to learn about possible attributes.
+	// Hover to view descriptions of existing attributes.
+	// For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+	"version": "0.2.0",
+	"configurations": [
+		{
+			"name": "Train paired",
+			"type": "python",
+			"request": "launch",
+			"program": "ddim_train.py",
+			"console": "integratedTerminal",
+			"justMyCode": true,
+			"args": [
+				"--outdir=output/debug",
+				"--cfg=ddim",
+				// "--g_cfg=pg_modules/score_sde/configs/cifar10.yml",
+				"--g_cfg=ddim/configs/cifar10.yml",
+				"--ddim_config=ddim/configs/cifar10.yml",
+				"--ddim_args=ddim/args/cifar10.yml",
+
+				"--data=data/cifar10.zip",
+				"--mirror=1",
+
+				"--gpus=2",
+				"--batch=128",
+				"--batch-gpu=64",
+
+				// "--gpus=1",
+				// "--batch=16",
+				// "--batch-gpu=16",
+
+				"--snap=50",
+				"--kimg=10000",
+				"--restart_every", "0"
+			]
+		}
+	]
+}

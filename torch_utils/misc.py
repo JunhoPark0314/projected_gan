@@ -268,5 +268,6 @@ def print_module_summary(module, inputs, max_nesting=3, skip_redundant=True):
 # Added by Katja
 import os
 
-def get_ckpt_path(run_dir):
-    return os.path.join(run_dir, f'network-snapshot.pkl')
+def get_ckpt_path(run_dir, step=None):
+    pkl_path = f'network-snapshot-{step:05d}.pkl' if step is not None else 'network-snapshot.pkl'
+    return os.path.join(run_dir, pkl_path)

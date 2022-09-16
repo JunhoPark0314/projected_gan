@@ -1,0 +1,22 @@
+not_use_tanh: false
+z_emb_dim: 256
+num_channels_dae: 128
+ch_mult: [1, 2, 2, 2]
+num_res_blocks: 2
+attn_resolutions: [16, ]
+dropout: 0.0
+resamp_with_conv: True
+image_size: 32
+num_channels: 3
+conditional: false
+fir: True
+fir_kernel: [1, 3, 3, 1]
+skip_rescale: True
+progressive: 'none'
+progressive_input: 'residual'
+progressive_combine: 'sum'
+embedding_type: 'positional'
+resblock_type: 'biggan'
+nz: 100
+n_mlp: 4
+centered: True

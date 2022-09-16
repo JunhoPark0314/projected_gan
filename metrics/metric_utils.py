@@ -22,7 +22,7 @@ from tqdm import tqdm
 #----------------------------------------------------------------------------
 
 class MetricOptions:
-    def __init__(self, G=None, G_kwargs={}, dataset_kwargs={}, num_gpus=1, rank=0, device=None, progress=None, cache=True, run_dir=None, cur_nimg=None, snapshot_pkl=None):
+    def __init__(self, G=None, G_kwargs={}, dataset_kwargs={}, num_gpus=1, rank=0, device=None, progress=None, cache=True, run_dir=None, cur_nimg=None, snapshot_pkl=None, diffusion=None, netTrg=None):
         assert 0 <= rank < num_gpus
         self.G              = G
         self.G_kwargs       = dnnlib.EasyDict(G_kwargs)
@@ -35,6 +35,8 @@ class MetricOptions:
         self.run_dir = run_dir
         self.cur_nimg = cur_nimg
         self.snapshot_pkl = snapshot_pkl
+        self.diffusion = diffusion
+        self.netTrg = netTrg
 
 #----------------------------------------------------------------------------
 
@@ -281,9 +283,14 @@ def compute_feature_stats_for_generator(opts, detector_url, detector_kwargs, rel
     while not stats.is_full():
         images = []
         for _i in range(batch_size // batch_gen):
-            z = torch.randn([batch_gen, G.z_dim], device=opts.device)
             # img = G(z=z, c=next(c_iter), truncation_psi=0.1, **opts.G_kwargs)
-            img = G(z=z, c=next(c_iter), **opts.G_kwargs)
+            if (opts.netTrg is not None) and (opts.diffusion is not None):
+                x_init = torch.randn([batch_gen, 3, opts.dataset_kwargs.resolution, opts.dataset_kwargs.resolution], device=opts.device)
+                z = torch.randn([batch_gen, opts.diffusion.num_step + 1, G.z_dim], device=opts.device)
+                img = opts.diffusion.sample_image(G, opts.netTrg, x_init, z)[-1]
+            else:
+                z = torch.randn([batch_gen, G.z_dim], device=opts.device)
+                img = G(z=z, c=next(c_iter), **opts.G_kwargs)
             img = (img * 127.5 + 128).clamp(0, 255).to(torch.uint8)
             images.append(img)
         images = torch.cat(images)

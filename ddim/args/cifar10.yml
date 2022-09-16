@@ -1,0 +1,2 @@
+pretrained: 'output/pretrained/cifar10.ckpt'
+num_step : 6

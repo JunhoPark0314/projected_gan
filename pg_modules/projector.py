@@ -154,3 +154,81 @@ class F_RandomProj(nn.Module):
         }
 
         return out
+
+class RandomProj(nn.Module):
+    def __init__(
+        self,
+        im_res=256,
+        cout=64,
+        expand=True,
+        proj_type=2,  # 0 = no projection, 1 = cross channel mixing, 2 = cross scale mixing
+        channels=None,
+        resolutions=None,
+        **kwargs,
+    ):
+        super().__init__()
+        self.proj_type = proj_type
+        self.cout = cout
+        self.expand = expand
+        self.resolutions = resolutions
+        self.channels = channels
+
+        scratch = None
+        ### Build CCM
+        if proj_type > 0:
+            scratch = nn.Module()
+            scratch = _make_scratch_ccm(scratch, in_channels=self.channels, cout=cout, expand=expand)
+            self.channels = scratch.CHANNELS
+        ### build CSM
+        if proj_type > 1:
+            scratch = _make_scratch_csm(scratch, in_channels=scratch.CHANNELS, cout=cout, expand=expand)
+            self.resolutions = [res * 2 for res in self.resolutions]
+            self.channels = scratch.CHANNELS
+        self.scratch = scratch
+
+    def forward(self, x):
+        # predict feature maps
+        # out0 = self.pretrained.layer0(x)
+        # out1 = self.pretrained.layer1(out0)
+        # out2 = self.pretrained.layer2(out1)
+        # out3 = self.pretrained.layer3(out2)
+        out0, out1, out2, out3 = x
+
+        # start enumerating at the lowest layer (this is where we put the first discriminator)
+        out = {
+            '0': out0,
+            '1': out1,
+            '2': out2,
+            '3': out3,
+        }
+
+        if self.proj_type == 0: return out
+
+        out0_channel_mixed = self.scratch.layer0_ccm(out['0'])
+        out1_channel_mixed = self.scratch.layer1_ccm(out['1'])
+        out2_channel_mixed = self.scratch.layer2_ccm(out['2'])
+        out3_channel_mixed = self.scratch.layer3_ccm(out['3'])
+
+        out = {
+            '0': out0_channel_mixed,
+            '1': out1_channel_mixed,
+            '2': out2_channel_mixed,
+            '3': out3_channel_mixed,
+        }
+
+        if self.proj_type == 1: return out
+
+        # from bottom to top
+        out3_scale_mixed = self.scratch.layer3_csm(out3_channel_mixed)
+        out2_scale_mixed = self.scratch.layer2_csm(out3_scale_mixed, out2_channel_mixed)
+        out1_scale_mixed = self.scratch.layer1_csm(out2_scale_mixed, out1_channel_mixed)
+        out0_scale_mixed = self.scratch.layer0_csm(out1_scale_mixed, out0_channel_mixed)
+
+        out = {
+            '0': out0_scale_mixed,
+            '1': out1_scale_mixed,
+            '2': out2_scale_mixed,
+            '3': out3_scale_mixed,
+        }
+
+        return out

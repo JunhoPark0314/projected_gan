@@ -51,6 +51,8 @@ class ProjectedGANLoss(Loss):
         do_Dmain = (phase in ['Dmain', 'Dboth'])
         if phase in ['Dreg', 'Greg']: return  # no regularization needed for PG
 
+        # sample T
+
         # blurring schedule
         blur_sigma = max(1 - cur_nimg / (self.blur_fade_kimg * 1e3), 0) * self.blur_init_sigma if self.blur_fade_kimg > 1 else 0
 
@@ -98,3 +100,89 @@ class ProjectedGANLoss(Loss):
 
             with torch.autograd.profiler.record_function('Dreal_backward'):
                 loss_Dreal.backward()
+
+
+class ProjectedPairedGANLoss(Loss):
+    def __init__(self, device, G, D, G_ema, netTrg, diffusion, blur_init_sigma=0, blur_fade_kimg=0, **kwargs):
+        super().__init__()
+        self.device = device
+        self.G = G
+        self.G_ema = G_ema
+        self.D = D
+        self.netTrg = netTrg
+        self.diffusion = diffusion
+        self.blur_init_sigma = blur_init_sigma
+        self.blur_fade_kimg = blur_fade_kimg
+
+    def run_G(self, x, t, z, update_emas=False):
+        return self.G(x, t, z)
+
+    def run_D(self, prev_x, next_x, prev_t, next_t, blur_sigma=0, update_emas=False):
+        prev_z = self.D(prev_x, prev_t)
+        next_z = self.D(next_x, next_t)
+        logits = self.D.disc(prev_z, next_z, prev_t, next_t)
+        return logits
+    
+    def accumulate_gradients(self, phase, real_img, real_c, gen_z, gen_c, gain, cur_nimg):
+        assert phase in ['Gmain', 'Greg', 'Gboth', 'Dmain', 'Dreg', 'Dboth']
+        do_Gmain = (phase in ['Gmain', 'Gboth'])
+        do_Dmain = (phase in ['Dmain', 'Dboth'])
+        if phase in ['Dreg', 'Greg']: return  # no regularization needed for PG
+
+        # blurring schedule
+        blur_sigma = max(1 - cur_nimg / (self.blur_fade_kimg * 1e3), 0) * self.blur_init_sigma if self.blur_fade_kimg > 1 else 0
+        next_t, prev_t = self.diffusion.sample_time(real_img)
+        a_next, a_prev, next_xt, prev_xt, prev_x0, next_x0 = self.diffusion.sample_noised_pair(real_img, next_t, prev_t, self.netTrg)
+
+        if do_Gmain:
+
+            # Gmain: Maximize logits for generated images.
+            with torch.autograd.profiler.record_function('Gmain_forward'):
+                next_x0_gen = self.run_G(prev_x0, prev_t, gen_z)
+                # next_xt_gen = self.diffusion.gen_noised(next_x0_gen, a_prev, a_next, prev_xt)
+                gen_logits = self.run_D(prev_x0, next_x0_gen, prev_t, next_t, blur_sigma=blur_sigma)
+                loss_Grec = (next_x0_gen - real_img).square().mean()
+                loss_Gmain = (-gen_logits).mean()
+
+                # Logging
+                training_stats.report('Loss/scores/fake', gen_logits)
+                training_stats.report('Loss/signs/fake', gen_logits.sign())
+                training_stats.report('Loss/G/loss', loss_Gmain)
+                training_stats.report('Loss/Rec/loss', loss_Grec)
+
+                loss_Gmain = loss_Gmain + loss_Grec
+
+            with torch.autograd.profiler.record_function('Gmain_backward'):
+                loss_Gmain.backward()
+
+        if do_Dmain:
+
+            # Dmain: Minimize logits for generated images.
+            with torch.autograd.profiler.record_function('Dgen_forward'):
+                next_x0_gen = self.run_G(prev_x0, prev_t, gen_z, update_emas=True)
+                # next_xt_gen = self.diffusion.gen_noised(next_x0_gen, a_prev, a_next, prev_xt)
+                gen_logits = self.run_D(prev_x0, next_x0_gen, prev_t, next_t, blur_sigma=blur_sigma)
+                loss_Dgen = (F.relu(torch.ones_like(gen_logits) + gen_logits)).mean()
+
+                # Logging
+                training_stats.report('Loss/scores/fake', gen_logits)
+                training_stats.report('Loss/signs/fake', gen_logits.sign())
+
+            with torch.autograd.profiler.record_function('Dgen_backward'):
+                loss_Dgen.backward()
+
+            # Dmain: Maximize logits for real images.
+            with torch.autograd.profiler.record_function('Dreal_forward'):
+                next_x_tmp = next_x0.detach().requires_grad_(False)
+                real_logits = self.run_D(prev_x0, next_x_tmp, prev_t, next_t, blur_sigma=blur_sigma)
+                loss_Dreal = (F.relu(torch.ones_like(real_logits) - real_logits)).mean()
+
+                # Logging
+                training_stats.report('Loss/scores/real', real_logits)
+                training_stats.report('Loss/signs/real', real_logits.sign())
+                training_stats.report('Loss/D/loss', loss_Dgen + loss_Dreal)
+
+            with torch.autograd.profiler.record_function('Dreal_backward'):
+                loss_Dreal.backward()
+            
+

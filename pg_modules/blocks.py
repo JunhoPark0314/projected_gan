@@ -64,6 +64,41 @@ class InitLayer(nn.Module):
         noise = noise.view(noise.shape[0], -1, 1, 1)
         return self.init(noise)
 
+class InitLayerUnet(nn.Module):
+    def __init__(self, nz, channel, sz=4, u_ch=128):
+        super().__init__()
+
+        self.init = nn.Sequential(
+            convTranspose2d(nz, channel*2, sz, 1, 0, bias=False),
+            NormLayer(channel*2),
+            GLU(),
+        )
+        self.conv1 = conv2d(u_ch, channel, 3, 1, 1)
+        self.block1 = nn.Sequential(
+            conv2d(channel, channel*2, 3, 1, 1),
+            NormLayer(channel*2),
+            GLU(),
+        )
+        self.conv2 = conv2d(u_ch, channel, 3, 1, 1)
+        self.block2 = nn.Sequential(
+            conv2d(channel, channel*2, 3, 1, 1),
+            NormLayer(channel*2),
+            GLU(),
+        )
+        self.conv3 = conv2d(u_ch, channel, 3, 1, 1)
+        self.block3 = nn.Sequential(
+            conv2d(channel, channel*2, 3, 1, 1),
+            NormLayer(channel*2),
+            GLU(),
+        )
+
+    def forward(self, noise, hs):
+        noise = noise.view(noise.shape[0], -1, 1, 1)
+        h = self.init(noise)
+        h = self.block1(self.conv1(hs[0]) + h)
+        h = self.block2(self.conv2(hs[0]) + h)
+        h = self.block3(self.conv3(hs[0]) + h)
+        return h
 
 def UpBlockSmall(in_planes, out_planes):
     block = nn.Sequential(
@@ -105,6 +140,53 @@ def UpBlockBig(in_planes, out_planes):
         )
     return block
 
+class UpBlockBigUnet(nn.Module):
+    def __init__(self, in_planes, out_planes, u_ch, last=1):
+        super().__init__()
+        self.in_planes = in_planes
+        self.out_planes = out_planes
+        self.up = nn.Upsample(scale_factor=2, mode='nearest')
+        self.conv1 = conv2d(in_planes, out_planes*2, 3, 1, 1, bias=False)
+        self.conv2 = conv2d(out_planes, out_planes*2, 3, 1, 1, bias=False)
+        self.conv3 = conv2d(out_planes, out_planes*2, 3, 1, 1, bias=False)
+        self.proj1 = conv2d(u_ch, in_planes, 1, 1, bias=False)
+        self.proj2 = conv2d(u_ch, out_planes, 1, 1, bias=False)
+        self.proj3 = conv2d(u_ch//last, out_planes, 1, 1, bias=False)
+        self.bn1 = nn.Sequential(*[
+            NormLayer(out_planes*2),
+            GLU(),
+        ])
+        self.bn2 = nn.Sequential(*[
+            NormLayer(out_planes*2),
+            GLU(),
+        ])
+        self.bn3 = nn.Sequential(*[
+            NormLayer(out_planes*2),
+            GLU(),
+        ])
+
+
+        self.act = GLU()
+        self.noise = NoiseInjection()
+
+    def forward(self, x, hs):
+        # block 1
+        x = self.up(x)
+        x = self.conv1(x + self.proj1(hs[0]))
+        x = self.noise(x)
+        x = self.bn1(x)
+
+        # block 2
+        x = self.conv2(x + self.proj2(hs[1]))
+        x = self.noise(x)
+        x = self.bn2(x)
+
+        # block 3
+        x = self.conv3(x + self.proj3(hs[2]))
+        x = self.noise(x)
+        x = self.bn3(x)
+
+        return x
 
 class UpBlockBigCond(nn.Module):
     def __init__(self, in_planes, out_planes, z_dim):
@@ -252,9 +334,9 @@ class FeatureFusionBlock(nn.Module):
 
 
 class NoiseInjection(nn.Module):
-    def __init__(self):
+    def __init__(self, noise_init=0.):
         super().__init__()
-        self.weight = nn.Parameter(torch.zeros(1), requires_grad=True)
+        self.weight = nn.Parameter(torch.ones(1) * noise_init, requires_grad=True)
 
     def forward(self, feat, noise=None):
         if noise is None:
