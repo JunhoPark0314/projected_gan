@@ -90,7 +90,7 @@ class ResnetBlockDDgan(nn.Module):
                                      padding=1)
         self.temb_proj = torch.nn.Linear(temb_channels,
                                          out_channels)
-        self.z_proj = torch.nn.Linear(z_dim, out_channels)
+        self.z_proj = torch.nn.Linear(z_dim, out_channels * 2)
         torch.nn.init.normal_(self.z_proj.weight, 0, 1e-4)
 
         self.norm2 = Normalize(out_channels)
@@ -124,12 +124,14 @@ class ResnetBlockDDgan(nn.Module):
         # h_spatial = self.z_spatial(z)
 
         h = self.norm2(h)
+
+        h_scale_bias = self.z_proj(z)[...,None,None]
+        h_scale, h_bias = torch.chunk(h_scale_bias, 2, 1)
+        h = h * (h_scale + 1) + h_bias
+
         h = nonlinearity(h)
         h = self.dropout(h)
         h = self.conv2(h)
-
-        h_scale = self.z_proj(z)[...,None,None]
-        h = h * (h_scale + 1)
 
         if self.in_channels != self.out_channels:
             if self.use_conv_shortcut:
@@ -286,6 +288,8 @@ class Model(nn.Module):
                             self.temb_ch),
         ])
 
+
+
         self.resblock_type = config.model.resblock_type
         if self.resblock_type == "ddpm":
             ResBlock = ResnetBlock
@@ -294,6 +298,14 @@ class Model(nn.Module):
             ResBlock = ResnetBlockDDgan
             self.z_dim = config.model.z_dim
             assert self.z_dim != 0
+
+            self.mapping_network = nn.Module()
+            self.mapping_network.dense = nn.ModuleList([
+                torch.nn.Linear(self.z_dim,
+                                self.z_dim),
+                torch.nn.Linear(self.z_dim,
+                                self.z_dim),
+            ])
 
         # downsampling
         self.conv_in = torch.nn.Conv2d(in_channels,
@@ -387,6 +399,11 @@ class Model(nn.Module):
         temb = self.temb.dense[0](temb)
         temb = nonlinearity(temb)
         temb = self.temb.dense[1](temb)
+
+        if self.z_dim != 0:
+            z = self.mapping_network.dense[0](z)
+            z = nonlinearity(z)
+            z = self.mapping_network.dense[1](z)
 
         # if self.z_dim != 0:
         #     x = x.tanh()

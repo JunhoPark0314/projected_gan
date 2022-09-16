@@ -141,7 +141,7 @@ class ProjectedPairedGANLoss(Loss):
                 next_x0_gen = self.run_G(prev_x0, prev_t, gen_z)
                 # next_xt_gen = self.diffusion.gen_noised(next_x0_gen, a_prev, a_next, prev_xt)
                 gen_logits = self.run_D(prev_x0, next_x0_gen, prev_t, next_t, blur_sigma=blur_sigma)
-                loss_Grec = (next_x0_gen - real_img).square().mean()
+                loss_Grec = (next_x0_gen - real_img).square().mean() * 0
                 loss_Gmain = (-gen_logits).mean()
 
                 # Logging
