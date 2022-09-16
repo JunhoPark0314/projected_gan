@@ -100,6 +100,7 @@ def training_loop(
 		data_loader_kwargs			= {},				# Options for torch.utils.data.DataLoader.
 		G_kwargs								= {},				# Options for generator network.
 		D_kwargs								= {},				# Options for discriminator network.
+		NaiveD_kwargs				= {},
 		G_opt_kwargs						= {},				# Options for generator optimizer.
 		D_opt_kwargs						= {},				# Options for discriminator optimizer.
 		loss_kwargs							= {},				# Options for loss function.
@@ -165,6 +166,8 @@ def training_loop(
 		netTrg = dnnlib.util.construct_class_by_name(class_name="ddim.models.diffusion.Model", config=ddim_config).eval().requires_grad_(False).to(device)
 		#D_kwargs.feature_network = netTrg
 		D = dnnlib.util.construct_class_by_name(**D_kwargs, **common_kwargs).train().requires_grad_(False).to(device) # subclass of torch.nn.Module
+		NaiveD = dnnlib.util.construct_class_by_name(**NaiveD_kwargs).train().requires_grad_(False).to(device)
+		D.NaiveD = NaiveD
 		G_ema = copy.deepcopy(G).eval()
 		from ddim.runners.light_diffusion import Diffusion
 		from ddim.models.diffusion import Model as Denoiser

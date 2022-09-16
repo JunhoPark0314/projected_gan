@@ -121,7 +121,8 @@ class ProjectedPairedGANLoss(Loss):
         prev_z = self.D(prev_x, prev_t)
         next_z = self.D(next_x, next_t)
         logits = self.D.disc(prev_z, next_z, prev_t, next_t)
-        return logits
+        naive_logits = self.D.NaiveD(torch.cat([prev_x, next_x], axis=1), prev_t)
+        return logits, naive_logits
     
     def accumulate_gradients(self, phase, real_img, real_c, gen_z, gen_c, gain, cur_nimg):
         assert phase in ['Gmain', 'Greg', 'Gboth', 'Dmain', 'Dreg', 'Dboth']
@@ -140,17 +141,18 @@ class ProjectedPairedGANLoss(Loss):
             with torch.autograd.profiler.record_function('Gmain_forward'):
                 next_x0_gen = self.run_G(prev_x0, prev_t, gen_z)
                 # next_xt_gen = self.diffusion.gen_noised(next_x0_gen, a_prev, a_next, prev_xt)
-                gen_logits = self.run_D(prev_x0, next_x0_gen, prev_t, next_t, blur_sigma=blur_sigma)
-                loss_Grec = (next_x0_gen - real_img).square().mean() * 0
+                gen_logits, gen_logits_naive = self.run_D(prev_x0, next_x0_gen, prev_t, next_t, blur_sigma=blur_sigma)
+                # loss_Grec = (next_x0_gen - real_img).square().mean() * 0
                 loss_Gmain = (-gen_logits).mean()
+                loss_Gnaive = torch.nn.functional.softplus(-gen_logits_naive).mean()
 
                 # Logging
                 training_stats.report('Loss/scores/fake', gen_logits)
                 training_stats.report('Loss/signs/fake', gen_logits.sign())
                 training_stats.report('Loss/G/loss', loss_Gmain)
-                training_stats.report('Loss/Rec/loss', loss_Grec)
+                training_stats.report('Loss/G/loss_naive', loss_Gnaive)
 
-                loss_Gmain = loss_Gmain + loss_Grec
+                loss_Gmain = loss_Gmain + loss_Gnaive
 
             with torch.autograd.profiler.record_function('Gmain_backward'):
                 loss_Gmain.backward()
@@ -161,28 +163,31 @@ class ProjectedPairedGANLoss(Loss):
             with torch.autograd.profiler.record_function('Dgen_forward'):
                 next_x0_gen = self.run_G(prev_x0, prev_t, gen_z, update_emas=True)
                 # next_xt_gen = self.diffusion.gen_noised(next_x0_gen, a_prev, a_next, prev_xt)
-                gen_logits = self.run_D(prev_x0, next_x0_gen, prev_t, next_t, blur_sigma=blur_sigma)
+                gen_logits, gen_logits_naive = self.run_D(prev_x0, next_x0_gen, prev_t, next_t, blur_sigma=blur_sigma)
                 loss_Dgen = (F.relu(torch.ones_like(gen_logits) + gen_logits)).mean()
+                loss_Dgen_naive = torch.nn.functional.softplus(gen_logits_naive).mean()
 
                 # Logging
                 training_stats.report('Loss/scores/fake', gen_logits)
                 training_stats.report('Loss/signs/fake', gen_logits.sign())
 
             with torch.autograd.profiler.record_function('Dgen_backward'):
-                loss_Dgen.backward()
+                (loss_Dgen + loss_Dgen_naive).backward()
 
             # Dmain: Maximize logits for real images.
             with torch.autograd.profiler.record_function('Dreal_forward'):
                 next_x_tmp = next_x0.detach().requires_grad_(False)
-                real_logits = self.run_D(prev_x0, next_x_tmp, prev_t, next_t, blur_sigma=blur_sigma)
+                real_logits, real_logits_naive = self.run_D(prev_x0, next_x_tmp, prev_t, next_t, blur_sigma=blur_sigma)
                 loss_Dreal = (F.relu(torch.ones_like(real_logits) - real_logits)).mean()
+                loss_Dreal_naive = torch.nn.functional.softplus(real_logits_naive).mean()
 
                 # Logging
                 training_stats.report('Loss/scores/real', real_logits)
                 training_stats.report('Loss/signs/real', real_logits.sign())
                 training_stats.report('Loss/D/loss', loss_Dgen + loss_Dreal)
+                training_stats.report('Loss/D/loss_naive', loss_Dgen_naive + loss_Dreal_naive)
 
             with torch.autograd.profiler.record_function('Dreal_backward'):
-                loss_Dreal.backward()
+                (loss_Dreal + loss_Dreal_naive).backward()
             
 

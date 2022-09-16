@@ -276,6 +276,16 @@ def main(**kwargs):
     c.D_kwargs.backbone_kwargs.separable = use_separable_discs
     c.D_kwargs.backbone_kwargs.cond = opts.cond
 
+    c.NaiveD_kwargs = dnnlib.EasyDict(
+        class_name='pg_modules.networks_stylegan2.Discriminator',
+        c_dim=0,
+        channel_base=16384,
+        channel_max=128,
+        num_fp16_res=8,
+        img_resolution=32,
+        img_channels=6,
+    )
+
     # Launch.
     launch_training(c=c, desc=desc, outdir=opts.outdir, dry_run=opts.dry_run)
 
