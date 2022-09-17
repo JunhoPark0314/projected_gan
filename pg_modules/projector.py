@@ -56,7 +56,7 @@ def calc_channels(pretrained, inp_res=224):
     return channels
 
 
-def _make_projector(im_res, cout, proj_type, expand=False):
+def _make_projector(im_res, cout, proj_type, expand=False, mult=1):
     assert proj_type in [0, 1, 2], "Invalid projection type"
 
     ### Build pretrained feature network
@@ -69,7 +69,7 @@ def _make_projector(im_res, cout, proj_type, expand=False):
     # independent of the dataset resolution
     im_res = 256
     pretrained.RESOLUTIONS = [im_res//4, im_res//8, im_res//16, im_res//32]
-    pretrained.CHANNELS = calc_channels(pretrained)
+    pretrained.CHANNELS = [f*mult for f in calc_channels(pretrained)]
 
     if proj_type == 0: return pretrained, None
 
@@ -105,7 +105,7 @@ class F_RandomProj(nn.Module):
         self.expand = expand
 
         # build pretrained feature network and random decoder (scratch)
-        self.pretrained, self.scratch = _make_projector(im_res=im_res, cout=self.cout, proj_type=self.proj_type, expand=self.expand)
+        self.pretrained, self.scratch = _make_projector(im_res=im_res, cout=self.cout, proj_type=self.proj_type, expand=self.expand, mult=kwargs.get("mult", 1))
         self.CHANNELS = self.pretrained.CHANNELS
         self.RESOLUTIONS = self.pretrained.RESOLUTIONS
 
@@ -202,6 +202,74 @@ class RandomProj(nn.Module):
             '3': out3,
         }
 
+        if self.proj_type == 0: return out
+
+        out0_channel_mixed = self.scratch.layer0_ccm(out['0'])
+        out1_channel_mixed = self.scratch.layer1_ccm(out['1'])
+        out2_channel_mixed = self.scratch.layer2_ccm(out['2'])
+        out3_channel_mixed = self.scratch.layer3_ccm(out['3'])
+
+        out = {
+            '0': out0_channel_mixed,
+            '1': out1_channel_mixed,
+            '2': out2_channel_mixed,
+            '3': out3_channel_mixed,
+        }
+
+        if self.proj_type == 1: return out
+
+        # from bottom to top
+        out3_scale_mixed = self.scratch.layer3_csm(out3_channel_mixed)
+        out2_scale_mixed = self.scratch.layer2_csm(out3_scale_mixed, out2_channel_mixed)
+        out1_scale_mixed = self.scratch.layer1_csm(out2_scale_mixed, out1_channel_mixed)
+        out0_scale_mixed = self.scratch.layer0_csm(out1_scale_mixed, out0_channel_mixed)
+
+        out = {
+            '0': out0_scale_mixed,
+            '1': out1_scale_mixed,
+            '2': out2_scale_mixed,
+            '3': out3_scale_mixed,
+        }
+
+        return out
+
+
+class F_RandomProj_seperate(nn.Module):
+    def __init__(
+        self,
+        im_res=256,
+        cout=64,
+        expand=True,
+        proj_type=2,  # 0 = no projection, 1 = cross channel mixing, 2 = cross scale mixing
+        **kwargs,
+    ):
+        super().__init__()
+        self.proj_type = proj_type
+        self.cout = cout
+        self.expand = expand
+
+        # build pretrained feature network and random decoder (scratch)
+        self.pretrained, self.scratch = _make_projector(im_res=im_res, cout=self.cout, proj_type=self.proj_type, expand=self.expand, mult=kwargs.get("mult", 1))
+        self.CHANNELS = self.pretrained.CHANNELS
+        self.RESOLUTIONS = self.pretrained.RESOLUTIONS
+
+    def forward(self, x):
+        # predict feature maps
+        out0 = self.pretrained.layer0(x)
+        out1 = self.pretrained.layer1(out0)
+        out2 = self.pretrained.layer2(out1)
+        out3 = self.pretrained.layer3(out2)
+
+        # start enumerating at the lowest layer (this is where we put the first discriminator)
+        out = {
+            '0': out0,
+            '1': out1,
+            '2': out2,
+            '3': out3,
+        }
+        return out
+
+    def mix(self, out):
         if self.proj_type == 0: return out
 
         out0_channel_mixed = self.scratch.layer0_ccm(out['0'])

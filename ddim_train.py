@@ -232,6 +232,7 @@ def main(**kwargs):
             c.G_kwargs.config = dict2namespace(yaml.safe_load(stream))
         c.G_kwargs.config.model.z_dim = 128
         c.G_kwargs.config.model.resblock_type = 'ddgan'
+        # c.G_kwargs.config.model.resblock_type = 'fastgan'
         use_separable_discs = True
         c.G_opt_kwargs.lr = c.D_opt_kwargs.lr = 0.0002
 
@@ -281,7 +282,7 @@ def main(**kwargs):
         c_dim=0,
         channel_base=16384,
         channel_max=128,
-        num_fp16_res=8,
+        num_fp16_res=4,
         img_resolution=32,
         img_channels=6,
     )

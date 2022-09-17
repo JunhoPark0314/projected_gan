@@ -6,7 +6,7 @@ import torch.nn.functional as F
 from ddim.models.diffusion import get_timestep_embedding
 
 from pg_modules.blocks import DownBlock, DownBlockPatch, conv2d
-from pg_modules.projector import F_RandomProj, RandomProj
+from pg_modules.projector import F_RandomProj, RandomProj, F_RandomProj_seperate
 from pg_modules.diffaug import DiffAugment
 
 
@@ -284,10 +284,17 @@ class ProjectedPairedDiscriminator(torch.nn.Module):
                 #self.proj_network = RandomProj(im_res=32, cout=64, proj_type=2, 
                 #                channels=[128, 256, 256, 256], resolutions=[32, 16, 8, 4])
 
-                self.feature_network = F_RandomProj(**backbone_kwargs)
+                self.feature_network = F_RandomProj_seperate(**backbone_kwargs, mult=2)
+
+                self.pair_discriminator = MultiScaleD(
+                        channels=self.feature_network.CHANNELS,
+                        resolutions=self.feature_network.RESOLUTIONS,
+                        tcond=1,
+                        **backbone_kwargs,
+                )
 
                 self.discriminator = MultiScaleD(
-                        channels=[f*2 for f in self.feature_network.CHANNELS],
+                        channels=self.feature_network.CHANNELS,
                         resolutions=self.feature_network.RESOLUTIONS,
                         tcond=1,
                         **backbone_kwargs,
@@ -297,23 +304,27 @@ class ProjectedPairedDiscriminator(torch.nn.Module):
                 self.feature_network = self.feature_network.train(False)
                 #self.proj_network = self.proj_network.train(False)
                 self.discriminator = self.discriminator.train(mode)
+                self.pair_discriminator = self.pair_discriminator.train(mode)
                 return self
 
         def eval(self):
                 return self.train(False)
         
         def forward(self, x, t):
-                #if self.diffaug:
-                #       x = DiffAugment(x, policy='color,translation,cutout')
+                # if self.diffaug:
+                x = DiffAugment(x, policy='color,translation,cutout')
 
                 #if self.interp224:
                 x = F.interpolate(x, 224, mode='bilinear', align_corners=False)
                 feature_list = self.feature_network(x)
-
+                
                 return feature_list
 
         def disc(self, z1, z2, t1, t2):
                 paired_z = {k: torch.cat([z1[k], z2[k]], axis=1) for k in z1.keys()}
+                # paired_z = self.feature_network.mix(paired_z)
+                # z1 = self.feature_network.mix(z1)
+                # z2 = self.feature_network.mix(z2)
                 logits = self.discriminator(paired_z, t1, t2)
 
                 return logits

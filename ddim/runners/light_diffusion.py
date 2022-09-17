@@ -143,12 +143,12 @@ class Diffusion(object):
     
     def sample_image(self, model, netTrg, x_init, z=None):
         with torch.no_grad():
+            step_size = self.num_timesteps // self.num_step
             n = x_init.size(0)
-            t = torch.ones(n).to(x_init.device) * (self.num_timesteps - 1)
+            t = torch.ones(n).to(x_init.device) * (self.num_timesteps - step_size//2)
             etrg = netTrg(x_init, t)
             at = compute_alpha(self.betas, t.long())
             x_init = (x_init - etrg * (1 - at).sqrt()) / at.sqrt()
-            step_size = self.num_timesteps // self.num_step
             assert z.shape[1] == (self.num_step + 1)
             x0_list = [x_init.cpu()[None,...]]
             x_t = x_init

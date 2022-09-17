@@ -73,9 +73,9 @@ class Downsample(nn.Module):
             x = torch.nn.functional.avg_pool2d(x, kernel_size=2, stride=2)
         return x
 
-class ResnetBlockDDgan(nn.Module):
+class ResnetBlockFastGan(nn.Module):
     def __init__(self, *, in_channels, out_channels=None, conv_shortcut=False,
-                 dropout, temb_channels=512, z_dim=128, **kwargs):
+                 dropout, temb_channels=512, z_dim=128, skip_z=True, **kwargs):
         super().__init__()
         self.in_channels = in_channels
         out_channels = in_channels if out_channels is None else out_channels
@@ -113,6 +113,16 @@ class ResnetBlockDDgan(nn.Module):
                                                     kernel_size=1,
                                                     stride=1,
                                                     padding=0)
+        
+        self.skip_z = skip_z
+        if self.skip_z:
+            self.se_block = nn.Sequential(*[
+                nn.AdaptiveAvgPool2d(4),
+                torch.nn.Conv2d(out_channels, out_channels, 4, 1, 0, bias=False),
+                torch.nn.SiLU(),
+                torch.nn.Conv2d(out_channels, z_dim, 1, 1, 0, bias=False),
+                torch.nn.SiLU(),
+            ])
 
     def forward(self, x, temb, z):
         h = x
@@ -139,7 +149,81 @@ class ResnetBlockDDgan(nn.Module):
             else:
                 x = self.nin_shortcut(x)
 
-        return x+h
+        skip_z = z + self.se_block(h).squeeze() if self.skip_z else None
+        return x+h, skip_z
+
+class ResnetBlockDDgan(nn.Module):
+    def __init__(self, *, in_channels, out_channels=None, conv_shortcut=False,
+                 dropout, temb_channels=512, z_dim=128, **kwargs):
+        super().__init__()
+        self.in_channels = in_channels
+        out_channels = in_channels if out_channels is None else out_channels
+        self.out_channels = out_channels
+        self.use_conv_shortcut = conv_shortcut
+
+        self.z_proj1 = torch.nn.Linear(z_dim, in_channels * 2)
+        torch.nn.init.normal_(self.z_proj1.weight, 0, 1e-4)
+        self.norm1 = Normalize(in_channels)
+        self.conv1 = torch.nn.Conv2d(in_channels,
+                                     out_channels,
+                                     kernel_size=3,
+                                     stride=1,
+                                     padding=1)
+        self.temb_proj = torch.nn.Linear(temb_channels,
+                                         out_channels)
+        self.z_proj2 = torch.nn.Linear(z_dim, out_channels * 2)
+        torch.nn.init.normal_(self.z_proj2.weight, 0, 1e-4)
+
+        self.norm2 = Normalize(out_channels)
+        self.dropout = torch.nn.Dropout(dropout)
+        self.conv2 = torch.nn.Conv2d(out_channels,
+                                     out_channels,
+                                     kernel_size=3,
+                                     stride=1,
+                                     padding=1)
+        if self.in_channels != self.out_channels:
+            if self.use_conv_shortcut:
+                self.conv_shortcut = torch.nn.Conv2d(in_channels,
+                                                     out_channels,
+                                                     kernel_size=3,
+                                                     stride=1,
+                                                     padding=1)
+            else:
+                self.nin_shortcut = torch.nn.Conv2d(in_channels,
+                                                    out_channels,
+                                                    kernel_size=1,
+                                                    stride=1,
+                                                    padding=0)
+
+    def forward(self, x, temb, z):
+        h = x
+        h = self.norm1(h)
+        h_scale_bias = self.z_proj1(z)[...,None,None]
+        h_scale, h_bias = torch.chunk(h_scale_bias, 2, 1)
+        h = h * (h_scale + 1) + h_bias
+        h = nonlinearity(h)
+        h = self.conv1(h)
+
+        h = h + self.temb_proj(nonlinearity(temb))[:, :, None, None]
+        # h_spatial = self.z_spatial(z)
+
+        h = self.norm2(h)
+
+        h_scale_bias = self.z_proj2(z)[...,None,None]
+        h_scale, h_bias = torch.chunk(h_scale_bias, 2, 1)
+        h = h * (h_scale + 1) + h_bias
+
+        h = nonlinearity(h)
+        h = self.dropout(h)
+        h = self.conv2(h)
+
+        if self.in_channels != self.out_channels:
+            if self.use_conv_shortcut:
+                x = self.conv_shortcut(x)
+            else:
+                x = self.nin_shortcut(x)
+
+        return x+h, z
 
 class ResnetBlock(nn.Module):
     def __init__(self, *, in_channels, out_channels=None, conv_shortcut=False,
@@ -198,7 +282,7 @@ class ResnetBlock(nn.Module):
             else:
                 x = self.nin_shortcut(x)
 
-        return x+h
+        return x+h, None
 
 
 class AttnBlock(nn.Module):
@@ -306,6 +390,18 @@ class Model(nn.Module):
                 torch.nn.Linear(self.z_dim,
                                 self.z_dim),
             ])
+        elif self.resblock_type == "fastgan":
+            ResBlock = ResnetBlockFastGan
+            self.z_dim = config.model.z_dim
+            assert self.z_dim != 0
+
+            self.mapping_network = nn.Module()
+            self.mapping_network.dense = nn.ModuleList([
+                torch.nn.Linear(self.z_dim,
+                                self.z_dim),
+                torch.nn.Linear(self.z_dim,
+                                self.z_dim),
+            ])
 
         # downsampling
         self.conv_in = torch.nn.Conv2d(in_channels,
@@ -328,7 +424,8 @@ class Model(nn.Module):
                                          out_channels=block_out,
                                          temb_channels=self.temb_ch,
                                          dropout=dropout,
-                                         z_dim=self.z_dim))
+                                         z_dim=self.z_dim, 
+                                         size=curr_res))
                 block_in = block_out
                 if curr_res in attn_resolutions:
                     attn.append(AttnBlock(block_in))
@@ -346,13 +443,17 @@ class Model(nn.Module):
                                        out_channels=block_in,
                                        temb_channels=self.temb_ch,
                                        dropout=dropout,
-                                       z_dim=self.z_dim)
+                                       z_dim=self.z_dim,
+                                       size=curr_res,
+                                       skip_z=False)
         self.mid.attn_1 = AttnBlock(block_in)
         self.mid.block_2 = ResBlock(in_channels=block_in,
                                        out_channels=block_in,
                                        temb_channels=self.temb_ch,
                                        dropout=dropout,
-                                       z_dim=self.z_dim)
+                                       z_dim=self.z_dim,
+                                       size=curr_res,
+                                       skip_z=False)
 
         # upsampling
         self.up = nn.ModuleList()
@@ -368,7 +469,9 @@ class Model(nn.Module):
                                          out_channels=block_out,
                                          temb_channels=self.temb_ch,
                                          dropout=dropout,
-                                         z_dim=self.z_dim))
+                                         z_dim=self.z_dim,
+                                         size=curr_res,
+                                         skip_z=False))
                 block_in = block_out
                 if curr_res in attn_resolutions:
                     attn.append(AttnBlock(block_in))
@@ -410,28 +513,32 @@ class Model(nn.Module):
 
         # downsampling
         hs = [self.conv_in(x)]
+        zs = [z]
         for i_level in range(self.num_resolutions):
             for i_block in range(self.num_res_blocks):
-                h = self.down[i_level].block[i_block](hs[-1], temb, z)
+                h, z_ = self.down[i_level].block[i_block](hs[-1], temb, z)
                 if len(self.down[i_level].attn) > 0:
                     h = self.down[i_level].attn[i_block](h)
                 hs.append(h)
+                zs.append(z_)
             if i_level != self.num_resolutions-1:
                 hs.append(self.down[i_level].downsample(hs[-1]))
+                zs.append(z)
 
         # middle
         h = hs[-1]
-        h = self.mid.block_1(h, temb, z)
+        h, _ = self.mid.block_1(h, temb, z)
         h = self.mid.attn_1(h)
-        h = self.mid.block_2(h, temb, z)
+        h, _ = self.mid.block_2(h, temb, z)
+
 
         enc_list = []
 
         # upsampling
         for i_level in reversed(range(self.num_resolutions)):
             for i_block in range(self.num_res_blocks+1):
-                h = self.up[i_level].block[i_block](
-                    torch.cat([h, hs.pop()], dim=1), temb, z)
+                h, _ = self.up[i_level].block[i_block](
+                    torch.cat([h, hs.pop()], dim=1), temb, zs.pop())
                 if len(self.up[i_level].attn) > 0:
                     h = self.up[i_level].attn[i_block](h)
             if i_level != 0:
@@ -448,3 +555,121 @@ class Model(nn.Module):
         h = nonlinearity(h)
         h = self.conv_out(h)
         return h
+
+
+import numpy as np
+
+class FullyConnectedLayer(torch.nn.Module):
+    def __init__(self,
+        in_features,                # Number of input features.
+        out_features,               # Number of output features.
+        activation      = 'linear', # Activation function: 'relu', 'lrelu', etc.
+        bias            = True,     # Apply additive bias before the activation function?
+        lr_multiplier   = 1,        # Learning rate multiplier.
+        weight_init     = 1,        # Initial standard deviation of the weight tensor.
+        bias_init       = 0,        # Initial value of the additive bias.
+    ):
+        super().__init__()
+        self.in_features = in_features
+        self.out_features = out_features
+        self.activation = activation
+        self.weight = torch.nn.Parameter(torch.randn([out_features, in_features]) * (weight_init / lr_multiplier))
+        bias_init = np.broadcast_to(np.asarray(bias_init, dtype=np.float32), [out_features])
+        self.bias = torch.nn.Parameter(torch.from_numpy(bias_init / lr_multiplier)) if bias else None
+        self.weight_gain = lr_multiplier / np.sqrt(in_features)
+        self.bias_gain = lr_multiplier
+
+    def forward(self, x):
+        w = self.weight.to(x.dtype) * self.weight_gain
+        b = self.bias
+        if b is not None:
+            b = b.to(x.dtype)
+            if self.bias_gain != 1:
+                b = b * self.bias_gain
+        if self.activation == 'linear' and b is not None:
+            x = torch.addmm(b.unsqueeze(0), x, w.t())
+        else:
+            x = x.matmul(w.t())
+            # x = bias_act.bias_act(x, b, act=self.activation)
+            x = nn.functional.leak_relu(x) * np.sqrt(0.5) + b
+        return x
+
+class SynthesisInput(torch.nn.Module):
+    def __init__(self,
+        w_dim,          # Intermediate latent (W) dimensionality.
+        t_dim,
+        channels,       # Number of output channels.
+        size,           # Output spatial size: int or [width, height].
+        sampling_rate,  # Output sampling rate.
+        bandwidth,      # Output bandwidth.
+    ):
+        super().__init__()
+        self.w_dim = w_dim
+        self.channels = channels
+        self.size = np.broadcast_to(np.asarray(size), [2])
+        self.sampling_rate = sampling_rate
+        self.bandwidth = bandwidth
+
+        # Draw random frequencies from uniform 2D disc.
+        freqs = torch.randn([self.channels, 2])
+        radii = freqs.square().sum(dim=1, keepdim=True).sqrt()
+        freqs /= radii * radii.square().exp().pow(0.25)
+        freqs *= bandwidth
+        phases = torch.rand([self.channels]) - 0.5
+
+        # Setup parameters and buffers.
+        self.weight = torch.nn.Parameter(torch.randn([self.channels, self.channels]))
+        self.affine = FullyConnectedLayer(w_dim, 4, weight_init=0, bias_init=[1,0,0,0])
+        self.amp_affine = FullyConnectedLayer(t_dim + w_dim, channels, weight_init=1e-3)
+        self.register_buffer('transform', torch.eye(3, 3)) # User-specified inverse transform wrt. resulting image.
+        self.register_buffer('freqs', freqs)
+        self.register_buffer('phases', phases)
+
+    def forward(self, w, temb):
+        # Introduce batch dimension.
+        transforms = self.transform.unsqueeze(0) # [batch, row, col]
+        freqs = self.freqs.unsqueeze(0) # [batch, channel, xy]
+        phases = self.phases.unsqueeze(0) # [batch, channel]
+
+        # Apply learned transformation.
+        t = self.affine(w) # t = (r_c, r_s, t_x, t_y)
+        t = t / t[:, :2].norm(dim=1, keepdim=True) # t' = (r'_c, r'_s, t'_x, t'_y)
+        m_r = torch.eye(3, device=w.device).unsqueeze(0).repeat([w.shape[0], 1, 1]) # Inverse rotation wrt. resulting image.
+        m_r[:, 0, 0] = t[:, 0]  # r'_c
+        m_r[:, 0, 1] = -t[:, 1] # r'_s
+        m_r[:, 1, 0] = t[:, 1]  # r'_s
+        m_r[:, 1, 1] = t[:, 0]  # r'_c
+        m_t = torch.eye(3, device=w.device).unsqueeze(0).repeat([w.shape[0], 1, 1]) # Inverse translation wrt. resulting image.
+        m_t[:, 0, 2] = -t[:, 2] # t'_x
+        m_t[:, 1, 2] = -t[:, 3] # t'_y
+        transforms = m_r @ m_t @ transforms # First rotate resulting image, then translate, and finally apply user-specified transform.
+
+        # Transform frequencies.
+        phases = phases + (freqs @ transforms[:, :2, 2:]).squeeze(2)
+        freqs = freqs @ transforms[:, :2, :2]
+
+        # Dampen out-of-band frequencies that may occur due to the user-specified transform.
+        amplitudes = (1 - (freqs.norm(dim=2) - self.bandwidth) / (self.sampling_rate / 2 - self.bandwidth)).clamp(0, 1)
+
+        # Construct sampling grid.
+        theta = torch.eye(2, 3, device=w.device)
+        theta[0, 0] = 0.5 * self.size[0] / self.sampling_rate
+        theta[1, 1] = 0.5 * self.size[1] / self.sampling_rate
+        grids = torch.nn.functional.affine_grid(theta.unsqueeze(0), [1, 1, self.size[1], self.size[0]], align_corners=False)
+
+        # Compute Fourier features.
+        x = (grids.unsqueeze(3) @ freqs.permute(0, 2, 1).unsqueeze(1).unsqueeze(2)).squeeze(3) # [batch, height, width, channel]
+        x = x + phases.unsqueeze(1).unsqueeze(2)
+        x = torch.sin(x * (np.pi * 2))
+        x = x * amplitudes.unsqueeze(1).unsqueeze(2)
+
+        amp_mod = self.amp_affine(torch.cat([w, temb], -1))
+        x = x * (amp_mod.unsqueeze(1).unsqueeze(2))
+
+        # Apply trainable mapping.
+        weight = self.weight / np.sqrt(self.channels)
+        x = x @ weight.t()
+
+        # Ensure correct shape.
+        x = x.permute(0, 3, 1, 2) # [batch, channel, height, width]
+        return x
