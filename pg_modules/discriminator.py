@@ -49,7 +49,7 @@ class SingleDisc(nn.Module):
                 layers.append(conv2d(nfc[end_sz], 1, 4, 1, 0, bias=False))
                 self.main = nn.Sequential(*layers)
 
-        def forward(self, x, c=None):
+        def forward(self, x, c=None, **kwargs):
                 return self.main(x)
 
 
@@ -165,16 +165,16 @@ class SingleDiscTemb(nn.Module):
                 self.cls = conv2d(nfc[end_sz], 1, 4, 1, 0, bias=False)
 
 
-        def forward(self, x, prev_t, next_t):
+        def forward(self, x, prev_t):
                 # h = self.main(x)
                 # out = self.cls(h)
 
-                prev_temb = get_timestep_embedding(prev_t, self.t_dim//2)
-                next_temb = get_timestep_embedding(next_t, self.t_dim//2)
+                prev_temb = get_timestep_embedding(prev_t, self.t_dim)
+                # next_temb = get_timestep_embedding(next_t, self.t_dim//2)
                 h = x
                 for layer, emb_proj, norms in zip(self.main, self.emb_projs, self.normalize):
                         h = layer(h)
-                        h_bias_scale = emb_proj(torch.cat([prev_temb, next_temb], dim=-1))[...,None,None]
+                        h_bias_scale = emb_proj(prev_temb)[...,None,None]
                         h_scale, h_bias = torch.chunk(h_bias_scale, 2, 1)
                         h = norms(h) * (h_scale+1) + h_bias
 
@@ -221,10 +221,10 @@ class MultiScaleD(nn.Module):
         #         all_logits = torch.cat(all_logits, dim=1)
         #         return all_logits
 
-        def forward(self, features, t1, t2):
+        def forward(self, features, t1):
                 all_logits = []
                 for k, disc in self.mini_discs.items():
-                        all_logits.append(disc(features[k], t1, t2).view(features[k].size(0), -1))
+                        all_logits.append(disc(features[k], t1).view(features[k].size(0), -1))
 
                 all_logits = torch.cat(all_logits, dim=1)
                 return all_logits
@@ -284,10 +284,10 @@ class ProjectedPairedDiscriminator(torch.nn.Module):
                 #self.proj_network = RandomProj(im_res=32, cout=64, proj_type=2, 
                 #                channels=[128, 256, 256, 256], resolutions=[32, 16, 8, 4])
 
-                self.feature_network = F_RandomProj_seperate(**backbone_kwargs, mult=2)
+                self.feature_network = F_RandomProj_seperate(**backbone_kwargs, mult=1)
 
                 self.pair_discriminator = MultiScaleD(
-                        channels=self.feature_network.CHANNELS,
+                        channels=[f*2 for f in self.feature_network.CHANNELS],
                         resolutions=self.feature_network.RESOLUTIONS,
                         tcond=1,
                         **backbone_kwargs,
@@ -300,11 +300,18 @@ class ProjectedPairedDiscriminator(torch.nn.Module):
                         **backbone_kwargs,
                 )
 
+                self.layer_norms = {}
+                for i, (c, r) in enumerate(zip(self.feature_network.CHANNELS, [112, 56, 28, 14])):
+                    # self.layer_norms[str(i)] = nn.LayerNorm((c, r, r))
+                    self.layer_norms[str(i)] = nn.InstanceNorm2d(c)
+                self.layer_norms = nn.ModuleDict(self.layer_norms)
+
         def train(self, mode=True):
                 self.feature_network = self.feature_network.train(False)
                 #self.proj_network = self.proj_network.train(False)
                 self.discriminator = self.discriminator.train(mode)
                 self.pair_discriminator = self.pair_discriminator.train(mode)
+                self.layer_norms = self.layer_norms.train(mode)
                 return self
 
         def eval(self):
@@ -317,23 +324,17 @@ class ProjectedPairedDiscriminator(torch.nn.Module):
                 #if self.interp224:
                 x = F.interpolate(x, 224, mode='bilinear', align_corners=False)
                 feature_list = self.feature_network(x)
+                feature_list = self.feature_network.mix(feature_list)
                 
                 return feature_list
 
         def disc(self, z1, z2, t1, t2):
-                paired_z = {k: torch.cat([z1[k], z2[k]], axis=1) for k in z1.keys()}
+                paired_z = {k: torch.cat([z1[k], z2[k]], -1) for k in z1.keys()}
                 # paired_z = self.feature_network.mix(paired_z)
                 # z1 = self.feature_network.mix(z1)
                 # z2 = self.feature_network.mix(z2)
-                logits = self.discriminator(paired_z, t1, t2)
+                paired_logits = self.pair_discriminator(paired_z, t1)
+                logits = self.discriminator(z2, t1)
+                logits = torch.cat([paired_logits, logits], axis=-1)
 
                 return logits
-
-#feature_list.reverse()
-#proj_feature = self.proj_network(feature_list)
-#self.discriminator = MultiScaleD(
-#                       channels=[ch*2 for ch in self.proj_network.channels],
-#                       resolutions = self.proj_network.resolutions,
-#                       tcond=1,
-#                       **backbone_kwargs,
-#               )

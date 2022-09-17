@@ -82,6 +82,9 @@ class Diffusion(object):
         
         self.min_num_step = args.num_step
         self.num_step = args.num_step#int(self.num_timesteps * 0.7)
+        self.step_size = self.num_timesteps / self.num_step
+
+        self.T = torch.arange(self.step_size//2, self.num_timesteps, self.step_size).long().to(self.device)
 
     # def sample_noised_pair(self, x, next_t, prev_t, netTrg):
     #     e1 = torch.randn_like(x)
@@ -145,14 +148,14 @@ class Diffusion(object):
         with torch.no_grad():
             step_size = self.num_timesteps // self.num_step
             n = x_init.size(0)
-            t = torch.ones(n).to(x_init.device) * (self.num_timesteps - step_size//2)
+            t = torch.ones(n).to(x_init.device) * self.T[-1]
             etrg = netTrg(x_init, t)
             at = compute_alpha(self.betas, t.long())
             x_init = (x_init - etrg * (1 - at).sqrt()) / at.sqrt()
             assert z.shape[1] == (self.num_step + 1)
             x0_list = [x_init.cpu()[None,...]]
             x_t = x_init
-            for i in range(self.num_step + 1):
+            for i in range(self.num_step):
                 # x_init = model(x_init, t, z[:,i])
                 eps_pred = model(x_t, t, z[:,i])
                 at = compute_alpha(self.betas, t.long())
@@ -161,6 +164,7 @@ class Diffusion(object):
                 x0_list.append(x_s.cpu()[None,...])
                 x_t = x_s
                 t = torch.clip(t-step_size, min=0, max=self.num_timesteps)
+            assert (t <= 0).all().item()
             return torch.cat(x0_list)
 
     def gen_noised(self, et, at, at_next, xt, **kwargs):
@@ -185,7 +189,8 @@ class Diffusion(object):
     
     def sample_time(self, x):
         step_size = self.num_timesteps // self.num_step
-        prev_t = torch.randint(0, self.num_timesteps, (x.size(0),), device=x.device)
+        prev_t = torch.randint(0, self.num_step, (x.size(0),), device=x.device)
+        prev_t = self.T.index_select(0, prev_t.long())
         next_t = prev_t - step_size
 
         prev_t = torch.clip(prev_t, min=0, max=self.num_timesteps).long()
