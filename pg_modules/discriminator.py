@@ -329,7 +329,7 @@ class ProjectedPairedDiscriminator(torch.nn.Module):
                 return feature_list
 
         def disc(self, z1, z2, t1, t2):
-                paired_z = {k: torch.cat([z1[k], z2[k]], -1) for k in z1.keys()}
+                paired_z = {k: torch.cat([z1[k], z2[k]], 1) for k in z1.keys()}
                 # paired_z = self.feature_network.mix(paired_z)
                 # z1 = self.feature_network.mix(z1)
                 # z2 = self.feature_network.mix(z2)
