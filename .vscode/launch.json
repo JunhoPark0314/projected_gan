@@ -1,0 +1,26 @@
+{
+	// Use IntelliSense to learn about possible attributes.
+	// Hover to view descriptions of existing attributes.
+	// For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+	"version": "0.2.0",
+	"configurations": [
+		{
+			"name": "Python: Current File",
+			"type": "python",
+			"request": "launch",
+			"program": "train_iter.py",
+			"console": "integratedTerminal",
+			"justMyCode": true,
+			"args": [
+				"--outdir", "output/debug",
+				"--cfg", "fastgan_enc",
+				"--data", "datasets/pokemon/pokemon-1k-128x128.zip",
+				"--gpus", "2",
+				"--batch", "64",
+				"--mirror", "1",
+				"--snap", "100",
+				"--restart_every", "0"
+			]
+		}
+	]
+}

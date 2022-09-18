@@ -270,3 +270,10 @@ import os
 
 def get_ckpt_path(run_dir):
     return os.path.join(run_dir, f'network-snapshot.pkl')
+
+def dict2namespace(config):
+    namespace=dnnlib.EasyDict()
+    for key, value in config.items():
+        new_value = dict2namespace(value) if isinstance(value, dict) else value
+        setattr(namespace, key, new_value)
+    return namespace

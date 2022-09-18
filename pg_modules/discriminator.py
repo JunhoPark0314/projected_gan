@@ -184,3 +184,61 @@ class ProjectedDiscriminator(torch.nn.Module):
         logits = self.discriminator(features, c)
 
         return logits
+
+
+class ProjectedPairDiscriminator(torch.nn.Module):
+    def __init__(
+        self,
+        diffaug=True,
+        interp224=True,
+        backbone_kwargs={},
+        **kwargs
+    ):
+        super().__init__()
+        self.diffaug = diffaug
+        self.interp224 = interp224
+        self.feature_network = F_RandomProj(**backbone_kwargs)
+        self.discriminator = MultiScaleD(
+            channels=self.feature_network.CHANNELS,
+            resolutions=self.feature_network.RESOLUTIONS,
+            **backbone_kwargs,
+        )
+        self.pair_discriminator = MultiScaleD(
+            channels=[f * 2 for f in self.feature_network.CHANNELS],
+            resolutions=self.feature_network.RESOLUTIONS,
+            **backbone_kwargs,
+        )
+
+    def train(self, mode=True):
+        self.feature_network = self.feature_network.train(False)
+        self.discriminator = self.discriminator.train(mode)
+        return self
+
+    def eval(self):
+        return self.train(False)
+
+    def forward(self, x, c):
+        if self.diffaug:
+            x = DiffAugment(x, policy='color,translation,cutout')
+
+        if self.interp224:
+            x = F.interpolate(x, 224, mode='bilinear', align_corners=False)
+
+        features = self.feature_network(x)
+        logits = self.discriminator(features, c)
+
+        return logits
+
+    def pair_disc(self, x1, x2, c=None):
+        x = torch.cat([x1, x2])
+        x = DiffAugment(x, policy='color,translation,cutout')
+
+        if self.interp224:
+            x = F.interpolate(x, 224, mode='bilinear', align_corners=False)
+        
+        features = self.feature_network(x)
+        features = {k:torch.cat(torch.chunk(v, 2, 0), 1) for k,v in features.items()}
+
+        logits = self.pair_discriminator(features, c)
+
+        return logits
