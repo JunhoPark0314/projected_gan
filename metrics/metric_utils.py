@@ -290,7 +290,7 @@ def compute_feature_stats_for_generator(opts, detector_url, detector_kwargs, rel
             z = torch.randn([batch_gen, G.z_dim], device=opts.device)
             # img = G(z=z, c=next(c_iter), truncation_psi=0.1, **opts.G_kwargs)
             if data_iter is not None:
-                real_img = next(data_iter)
+                real_img, _ = next(data_iter)
                 real_img = (real_img.to(opts.device).to(torch.float32) / 127.5 - 1)
                 img = G(x=real_img, z=z, c=next(c_iter), **opts.G_kwargs)
             else:

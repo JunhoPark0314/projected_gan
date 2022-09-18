@@ -195,7 +195,8 @@ def training_loop(
         z = torch.empty([batch_gpu, G.z_dim], device=device)
         c = torch.empty([batch_gpu, G.c_dim], device=device)
         img = misc.print_module_summary(G, [x, z, c])
-        misc.print_module_summary(D, [img, c])
+        low = torch.nn.AdaptiveAvgPool2d((32, 32))(img)
+        misc.print_module_summary(D, [img, low, c])
 
     # Distribute across GPUs.
     if rank == 0:
