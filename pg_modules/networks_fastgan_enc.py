@@ -49,6 +49,7 @@ class FastganSynthesis(nn.Module):
         self.se_256 = SEBlock(nfc[16], nfc[256])
 
         self.to_big = conv2d(nfc[img_resolution], nc, 3, 1, 1, bias=True)
+        self.to_small = conv2d(nfc[32], nc, 3, 1, 1, bias=True)
 
         if img_resolution > 256:
             self.feat_512 = UpBlock(nfc[256], nfc[512])
@@ -61,9 +62,10 @@ class FastganSynthesis(nn.Module):
         input = normalize_second_moment(input[:, 0])
 
         feat_4 = self.init(input) 
-        feat_8 = self.feat_8(feat_4)
-        feat_16 = self.feat_16(feat_8) + self.h_proj(h)
+        feat_8 = self.feat_8(feat_4) + self.h_proj(h)
+        feat_16 = self.feat_16(feat_8) 
         feat_32 = self.feat_32(feat_16)
+
         feat_64 = self.se_64(feat_4, self.feat_64(feat_32))
         feat_128 = self.se_128(feat_8,  self.feat_128(feat_64))
 
@@ -79,7 +81,7 @@ class FastganSynthesis(nn.Module):
         if self.img_resolution >= 1024:
             feat_last = self.feat_1024(feat_last)
 
-        return self.to_big(feat_last)
+        return self.to_big(feat_last), self.to_small(feat_32)
 
 
 class FastganSynthesisCond(nn.Module):
@@ -158,7 +160,7 @@ class Encoder(nn.Module):
         z_dim=256,
     ):
         super().__init__()
-        num_layer = int(np.log2(img_resolution)) - 4
+        num_layer = int(np.log2(img_resolution)) - 2
         self.layers = []
         in_ch = img_channels
         hidden_ch = hidden_ch
@@ -166,6 +168,7 @@ class Encoder(nn.Module):
             self.layers.append(DownBlock(in_ch, hidden_ch))
             in_ch = hidden_ch
         # self.layers.append(nn.Conv2d(hidden_ch, z_dim, 4, 1))
+        self.layers.append(nn.GroupNorm(32))
         self.layers = nn.Sequential(*self.layers)
 
     def forward(self, x, z, c, **kwargs):
@@ -196,7 +199,9 @@ class Generator(nn.Module):
         Synthesis = FastganSynthesisCond if cond else FastganSynthesis
         self.synthesis = Synthesis(ngf=ngf, z_dim=z_dim, nc=img_channels, img_resolution=img_resolution, **synthesis_kwargs)
 
-    def forward(self, x, z, c, **kwargs):
+    def forward(self, x, z, c, return_small=False, **kwargs):
         h, w = self.mapping(x, z, c)
-        img = self.synthesis(h, w, c)
-        return img
+        high_res, low_res = self.synthesis(h, w, c)
+        if return_small:
+            return high_res, low_res
+        return high_res

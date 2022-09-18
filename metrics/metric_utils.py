@@ -22,7 +22,7 @@ from tqdm import tqdm
 #----------------------------------------------------------------------------
 
 class MetricOptions:
-    def __init__(self, G=None, G_kwargs={}, dataset_kwargs={}, num_gpus=1, rank=0, device=None, progress=None, cache=True, run_dir=None, cur_nimg=None, snapshot_pkl=None):
+    def __init__(self, G=None, G_kwargs={}, dataset_kwargs={}, num_gpus=1, rank=0, device=None, progress=None, cache=True, run_dir=None, cur_nimg=None, snapshot_pkl=None, data_iter=None, **kwargs):
         assert 0 <= rank < num_gpus
         self.G              = G
         self.G_kwargs       = dnnlib.EasyDict(G_kwargs)
@@ -35,6 +35,8 @@ class MetricOptions:
         self.run_dir = run_dir
         self.cur_nimg = cur_nimg
         self.snapshot_pkl = snapshot_pkl
+        self.data_iter = data_iter
+
 
 #----------------------------------------------------------------------------
 
@@ -276,6 +278,10 @@ def compute_feature_stats_for_generator(opts, detector_url, detector_kwargs, rel
 
     # get detector
     detector = get_feature_detector(url=detector_url, device=opts.device, num_gpus=opts.num_gpus, rank=opts.rank, verbose=progress.verbose)
+    data_iter = None
+    if opts.data_iter is not None:
+        # build data iter here
+        data_iter = opts.data_iter
 
     # Main loop.
     while not stats.is_full():
@@ -283,7 +289,12 @@ def compute_feature_stats_for_generator(opts, detector_url, detector_kwargs, rel
         for _i in range(batch_size // batch_gen):
             z = torch.randn([batch_gen, G.z_dim], device=opts.device)
             # img = G(z=z, c=next(c_iter), truncation_psi=0.1, **opts.G_kwargs)
-            img = G(z=z, c=next(c_iter), **opts.G_kwargs)
+            if data_iter is not None:
+                real_img = next(data_iter)
+                real_img = (real_img.to(opts.device).to(torch.float32) / 127.5 - 1)
+                img = G(x=real_img, z=z, c=next(c_iter), **opts.G_kwargs)
+            else:
+                img = G(z=z, c=next(c_iter), **opts.G_kwargs)
             img = (img * 127.5 + 128).clamp(0, 255).to(torch.uint8)
             images.append(img)
         images = torch.cat(images)

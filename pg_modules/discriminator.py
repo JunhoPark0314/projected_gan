@@ -1,5 +1,6 @@
 from functools import partial
 import numpy as np
+from pg_modules.diffaug_pair import DiffAugment_pair
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -199,7 +200,7 @@ class ProjectedPairDiscriminator(torch.nn.Module):
         self.interp224 = interp224
         self.feature_network = F_RandomProj(**backbone_kwargs)
         self.discriminator = MultiScaleD(
-            channels=self.feature_network.CHANNELS,
+            channels=[f*2 for f in self.feature_network.CHANNELS],
             resolutions=self.feature_network.RESOLUTIONS,
             **backbone_kwargs,
         )
@@ -217,14 +218,17 @@ class ProjectedPairDiscriminator(torch.nn.Module):
     def eval(self):
         return self.train(False)
 
-    def forward(self, x, c):
-        if self.diffaug:
-            x = DiffAugment(x, policy='color,translation,cutout')
-
+    def forward(self, high, low, c):
         if self.interp224:
-            x = F.interpolate(x, 224, mode='bilinear', align_corners=False)
+            high = F.interpolate(high, 224, mode='bilinear', align_corners=False)
+            low = F.interpolate(low, 224, mode='bilinear', align_corners=False)
 
+        if self.diffaug:
+            high, low = DiffAugment_pair(high, low, policy='color,translation,cutout')
+
+        x = torch.cat([high, low])
         features = self.feature_network(x)
+        features = {k:torch.cat(torch.chunk(v, 2, 0), 1) for k,v in features.items()}
         logits = self.discriminator(features, c)
 
         return logits
