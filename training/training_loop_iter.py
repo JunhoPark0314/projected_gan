@@ -37,8 +37,8 @@ from metrics import metric_main
 
 def setup_snapshot_image_grid(training_set, random_seed=0):
     rnd = np.random.RandomState(random_seed)
-    gw = np.clip(7680 // training_set.image_shape[2], 7, 4)
-    gh = np.clip(4320 // training_set.image_shape[1], 4, 4)
+    gw = np.clip(7680 // training_set.image_shape[2], 8, 8)
+    gh = np.clip(4320 // training_set.image_shape[1], 8, 8)
 
     # No labels => show random subset of training samples.
     if not training_set.has_labels:
@@ -237,6 +237,7 @@ def training_loop(
     if rank == 0:
         print('Exporting sample images...')
         grid_size, real_images, labels = setup_snapshot_image_grid(training_set=training_set)
+        real_images = np.tile(real_images[:real_images.shape[0]//4], (4,1,1,1))
         save_image_grid(real_images, os.path.join(run_dir, 'reals.png'), drange=[0,255], grid_size=grid_size)
         real_images = torch.tensor((real_images - 127.5) / 127.5).to(device).float()
 

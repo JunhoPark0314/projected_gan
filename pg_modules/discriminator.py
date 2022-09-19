@@ -219,9 +219,9 @@ class ProjectedPairDiscriminator(torch.nn.Module):
         return self.train(False)
 
     def forward(self, high, low, c):
-        if self.interp224:
-            high = F.interpolate(high, 224, mode='bilinear', align_corners=False)
-            low = F.interpolate(low, 224, mode='bilinear', align_corners=False)
+        interp = max(224, high.shape[2])
+        high = F.interpolate(high, interp, mode='bilinear', align_corners=False)
+        low = F.interpolate(low, interp, mode='bilinear', align_corners=False)
 
         if self.diffaug:
             high, low = DiffAugment_pair(high, low, policy='color,translation,cutout')
@@ -237,8 +237,8 @@ class ProjectedPairDiscriminator(torch.nn.Module):
         x = torch.cat([x1, x2])
         x = DiffAugment(x, policy='color,translation,cutout')
 
-        if self.interp224:
-            x = F.interpolate(x, 224, mode='bilinear', align_corners=False)
+        #if self.interp224:
+        x = F.interpolate(x, 224, mode='bilinear', align_corners=False)
         
         features = self.feature_network(x)
         features = {k:torch.cat(torch.chunk(v, 2, 0), 1) for k,v in features.items()}

@@ -33,7 +33,7 @@ class FastganSynthesis(nn.Module):
 
         # layers
         self.init = InitLayer(z_dim, channel=nfc[2], sz=4)
-        self.h_proj = nn.Conv2d(32, nfc[4], 1)
+        self.h_proj = nn.Conv2d(256, nfc[8], 1)
 
         UpBlock = UpBlockSmall if lite else UpBlockBig
 
@@ -61,8 +61,8 @@ class FastganSynthesis(nn.Module):
         # map noise to hypersphere as in "Progressive Growing of GANS"
         input = normalize_second_moment(input[:, 0])
 
-        feat_4 = self.init(input) + self.h_proj(h)
-        feat_8 = self.feat_8(feat_4) 
+        feat_4 = self.init(input) 
+        feat_8 = self.feat_8(feat_4) + self.h_proj(h)
         feat_16 = self.feat_16(feat_8) 
         feat_32 = self.feat_32(feat_16)
 
@@ -158,10 +158,10 @@ class Encoder(nn.Module):
         img_channels,
         hidden_ch = 128,
         z_dim=256,
-		out_ch=32,
+		out_ch=256,
     ):
         super().__init__()
-        num_layer = int(np.log2(img_resolution)) - 2
+        num_layer = int(np.log2(img_resolution)) - 3
         self.layers = []
         in_ch = img_channels
         hidden_ch = hidden_ch
