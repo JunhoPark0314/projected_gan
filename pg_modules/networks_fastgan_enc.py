@@ -2,8 +2,9 @@
 #
 # modified by Axel Sauer for "Projected GANs Converge Faster"
 #
+from ddim.models.diffusion import get_timestep_embedding
 import torch.nn as nn
-from pg_modules.blocks import (DownBlock, InitLayer, UpBlockBig, UpBlockBigCond, UpBlockSmall, UpBlockSmallCond, SEBlock, conv2d)
+from pg_modules.blocks import (DownBlock, ResnetBlock, InitLayer, UpBlockBig, UpBlockBigCond, UpBlockSmall, UpBlockSmallCond, SEBlock, conv2d)
 
 
 def normalize_second_moment(x, dim=1, eps=1e-8):
@@ -33,13 +34,16 @@ class FastganSynthesis(nn.Module):
 
         # layers
         self.init = InitLayer(z_dim, channel=nfc[2], sz=4)
-        self.h_proj = nn.Conv2d(256, nfc[8], 1)
+        self.t_proj = nn.Linear(512, z_dim)
 
         UpBlock = UpBlockSmall if lite else UpBlockBig
 
         self.feat_8   = UpBlock(nfc[4], nfc[8])
+        self.h_proj_8 = nn.Conv2d(128, nfc[8], 1)
         self.feat_16  = UpBlock(nfc[8], nfc[16])
+        self.h_proj_16 = nn.Conv2d(128, nfc[16], 1)
         self.feat_32  = UpBlock(nfc[16], nfc[32])
+        self.h_proj_32 = nn.Conv2d(128, nfc[32], 1)
         self.feat_64  = UpBlock(nfc[32], nfc[64])
         self.feat_128 = UpBlock(nfc[64], nfc[128])
         self.feat_256 = UpBlock(nfc[128], nfc[256])
@@ -57,17 +61,19 @@ class FastganSynthesis(nn.Module):
         if img_resolution > 512:
             self.feat_1024 = UpBlock(nfc[512], nfc[1024])
 
-    def forward(self, h, input, c, **kwargs):
+    def forward(self, hs, input, c, temb, **kwargs):
         # map noise to hypersphere as in "Progressive Growing of GANS"
-        input = normalize_second_moment(input[:, 0])
+        input = normalize_second_moment(input[:, 0]) + self.t_proj(temb)
 
         feat_4 = self.init(input) 
-        feat_8 = self.feat_8(feat_4) + self.h_proj(h)
-        feat_16 = self.feat_16(feat_8) 
-        feat_32 = self.feat_32(feat_16)
+        feat_8 = self.feat_8(feat_4)
+        feat_16 = self.feat_16(feat_8 + self.h_proj_8(hs.pop())) 
+        feat_32 = self.feat_32(feat_16 + self.h_proj_16(hs.pop()))
 
-        feat_64 = self.se_64(feat_4, self.feat_64(feat_32))
+        feat_64 = self.se_64(feat_4, self.feat_64(feat_32 + self.h_proj_32(hs.pop())))
         feat_128 = self.se_128(feat_8,  self.feat_128(feat_64))
+
+        assert not hs
 
         if self.img_resolution >= 128:
             feat_last = feat_128
@@ -158,22 +164,39 @@ class Encoder(nn.Module):
         img_channels,
         hidden_ch = 128,
         z_dim=256,
+        temb_dim=512,
 		out_ch=256,
     ):
         super().__init__()
-        num_layer = int(np.log2(img_resolution)) - 3
-        self.layers = []
+        self.num_layer = int(np.log2(img_resolution)) - 3
+        self.layers = nn.ModuleList()
         in_ch = img_channels
         hidden_ch = hidden_ch
-        for i in range(num_layer):
-            self.layers.append(DownBlock(in_ch, hidden_ch))
-            in_ch = hidden_ch
-        self.layers.append(nn.Conv2d(hidden_ch, out_ch, 1, 1))
-        self.layers.append(nn.GroupNorm(32, out_ch))
-        self.layers = nn.Sequential(*self.layers)
+        self.temb_mappper = nn.Sequential(*[
+            nn.Linear(temb_dim, temb_dim),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Linear(temb_dim, temb_dim),
+        ])
 
-    def forward(self, x, z, c, **kwargs):
-        return self.layers(x).squeeze(), z.unsqueeze(1)
+        self.init_conv = nn.Conv2d(in_ch, hidden_ch)
+        for i in range(self.num_layer):
+            self.layers.append(ResnetBlock(hidden_ch, hidden_ch))
+            self.layers.append(DownBlock(hidden_ch, hidden_ch))
+        
+    def forward(self, x, z, c, t, **kwargs):
+        temb = get_timestep_embedding(t, self.temb_dim)
+        temb = self.temb_mapper(temb)
+
+        h = self.init_conv(x)
+        hs = []
+        for i in range(self.num_layers):
+            h = self.layers[i*2](h, temb)
+            if h.shape[2] <= 32:
+                hs.append(h)
+            h = self.layers[i*2+1](h)
+        hs.append(h)
+
+        return hs, z.unsqueeze(1), temb
 
 class Generator(nn.Module):
     def __init__(
@@ -200,9 +223,9 @@ class Generator(nn.Module):
         Synthesis = FastganSynthesisCond if cond else FastganSynthesis
         self.synthesis = Synthesis(ngf=ngf, z_dim=z_dim, nc=img_channels, img_resolution=img_resolution, **synthesis_kwargs)
 
-    def forward(self, x, z, c, return_small=False, **kwargs):
-        h, w = self.mapping(x, z, c)
-        high_res, low_res = self.synthesis(h, w, c)
+    def forward(self, x, z, c, t, return_small=False, **kwargs):
+        h, w, temb = self.mapping(x, z, c, t)
+        high_res, low_res = self.synthesis(h, w, c, temb)
         if return_small:
             return high_res, low_res
         return high_res

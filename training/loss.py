@@ -109,12 +109,12 @@ class ProjectedGANPairLoss(Loss):
         self.D = D
         self.blur_init_sigma = blur_init_sigma
         self.blur_fade_kimg = blur_fade_kimg
-        self.warmup_nimg = 10 * 2**10 
+        self.buffer = {0:None, 1:None, 2:None}
 
     def run_G(self, real_img, z, c, update_emas=False):
-        h, ws = self.G.mapping(real_img, z, c, update_emas=update_emas)
-        high, low = self.G.synthesis(h, ws, c, update_emas=False)
-        return high, low
+        h, ws, temb = self.G.mapping(real_img, z, c, update_emas=update_emas)
+        gen = self.G.synthesis(h, ws, c, temb, update_emas=False)
+        return gen
 
     def run_D(self, high, low, c, blur_sigma=0, update_emas=False):
         blur_size = np.floor(blur_sigma * 3)
@@ -129,8 +129,14 @@ class ProjectedGANPairLoss(Loss):
     def run_E(self, img1, img2):
         logits = self.D.pair_disc(img1, img2)
         return logits
+    
+    def append_buffer(self, real_img):
+        self.input_condition[0] = torch.randn_like(real_img).cpu()
+        self.target_real[0] = real_img.cpu()
 
     def accumulate_gradients(self, phase, real_img, real_c, gen_z, gen_c, gain, cur_nimg):
+        self.append_buffer(real_img)
+
         assert phase in ['Gmain', 'Greg', 'Gboth', 'Dmain', 'Dreg', 'Dboth']
         do_Gmain = (phase in ['Gmain', 'Gboth'])
         do_Dmain = (phase in ['Dmain', 'Dboth'])
@@ -142,25 +148,31 @@ class ProjectedGANPairLoss(Loss):
         loss_Dpair_gen = 0
         loss_Dpair_real = 0
         warmup = max(min((cur_nimg - self.warmup_nimg) / self.warmup_nimg, 1), 0.001)
+        input_condition = []
+        target_real = []
+        timestep = []
+        for i in range(3):
+            if self.input_condition[i] is not None:
+                input_condition.append(self.input_condition[i])
+                target_real.append(self.target_real[i])
+                timestep.append(torch.ones(len(self.input_condition[i])) * (i + 1))
 
-        real_img_low = torch.nn.AdaptiveAvgPool2d((32, 32))(real_img)
-        real_img_high = real_img
-        
+        input_condition = torch.cat(input_condition).to(real_img.device)
+        target_real = torch.cat(target_real).to(real_img.device)
+        timestep = torch.cat(timestep).to(real_img.device)
+
         if do_Gmain:
 
             # Gmain: Maximize logits for generated images.
             with torch.autograd.profiler.record_function('Gmain_forward'):
-                gen_img_high, gen_img_low = self.run_G(real_img, gen_z, gen_c)
-                gen_logits = self.run_D(gen_img_high, gen_img_low, gen_c, blur_sigma=blur_sigma)
+                gen_img = self.run_G(input_condition, gen_z, gen_c, timestep)
+                gen_logits = self.run_D(gen_img, target_real, gen_c, blur_sigma=blur_sigma)
                 loss_Gmain = (-gen_logits).mean()
-                gen_pair_logits = self.run_E(gen_img_low, real_img_low)
-                loss_Gpair = (-gen_pair_logits).mean() * warmup
 
                 # Logging
                 training_stats.report('Loss/scores/fake', gen_logits)
                 training_stats.report('Loss/signs/fake', gen_logits.sign())
                 training_stats.report('Loss/G/loss', loss_Gmain)
-                training_stats.report('Loss/G/pair_loss', loss_Gpair)
 
             with torch.autograd.profiler.record_function('Gmain_backward'):
                 (loss_Gmain + loss_Gpair).backward()
@@ -169,11 +181,9 @@ class ProjectedGANPairLoss(Loss):
 
             # Dmain: Minimize logits for generated images.
             with torch.autograd.profiler.record_function('Dgen_forward'):
-                gen_img_high, gen_img_low = self.run_G(real_img, gen_z, gen_c, update_emas=True)
-                gen_logits = self.run_D(gen_img_high, gen_img_low, gen_c, blur_sigma=blur_sigma)
-                loss_Dgen = (F.relu(torch.ones_like(gen_logits) + gen_logits)).mean()
-                gen_pair_logits = self.run_E(gen_img_low, real_img_low)
-                loss_Dpair_gen = (F.relu(torch.ones_like(gen_pair_logits) + gen_pair_logits)).mean() * warmup
+                gen_img = self.run_G(input_condition, gen_z, gen_c, timestep, update_emas=True)
+                gen_logits = self.run_D(gen_img, target_real, gen_c, blur_sigma=blur_sigma)
+                loss_Dgen = (F.relu(torch.ones_like(gen_logits) * timestep * 0.5 + gen_logits)).mean()
 
                 # Logging
                 training_stats.report('Loss/scores/fake', gen_logits)
@@ -184,12 +194,9 @@ class ProjectedGANPairLoss(Loss):
 
             # Dmain: Maximize logits for real images.
             with torch.autograd.profiler.record_function('Dreal_forward'):
-                real_img_high_tmp = real_img_high.detach().requires_grad_(False)
-                real_img_low_tmp = real_img_low.detach().requires_grad_(False)
-                real_logits = self.run_D(real_img_high_tmp, real_img_low_tmp, real_c, blur_sigma=blur_sigma)
-                loss_Dreal = (F.relu(torch.ones_like(real_logits) - real_logits)).mean()
-                real_pair_logits = self.run_E(real_img_low_tmp, real_img_low_tmp)
-                loss_Dpair_real = (F.relu(torch.ones_like(real_pair_logits) - real_pair_logits)).mean() * warmup
+                target_real_tmp = target_real.detach().requires_grad_(False)
+                real_logits = self.run_D(target_real_tmp, target_real_tmp, real_c, blur_sigma=blur_sigma)
+                loss_Dreal = (F.relu(torch.ones_like(real_logits) * timestep * 0.5 - real_logits)).mean()
 
                 # Logging
                 training_stats.report('Loss/scores/real', real_logits)
@@ -199,3 +206,11 @@ class ProjectedGANPairLoss(Loss):
 
             with torch.autograd.profiler.record_function('Dreal_backward'):
                 (loss_Dreal + loss_Dpair_real).backward()
+        
+            # update buffer on Discriminator update
+            target_1 = timestep.long() == 0
+            target_2 = timestep.long() == 1
+            self.input_condition[1] = gen_img[target_1].detach().cpu()
+            self.input_condition[2] = gen_img[target_2].detach().cpu()
+            self.target_real[1] = target_real[target_1].detach().cpu()
+            self.target_real[2] = target_real[target_2].detach().cpu()
