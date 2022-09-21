@@ -5,6 +5,26 @@
 	"version": "0.2.0",
 	"configurations": [
 		{
+			"name": "Eval",
+			"type": "python",
+			"request": "launch",
+			"program": "calc_metrics.py",
+			"console": "integratedTerminal",
+			"justMyCode": true,
+			"args": [
+				"--network", "output/pair_disc/00000-fastgan_enc-art-painting-1k-256x256-gpus4-batch64/best_model.pkl",
+				// "--metrics", "pr50k3_full",
+				// "--cfg", "fastgan_enc",
+				"--data", "datasets/art-painting-1k-256x256.zip",
+				"--gpus", "4",
+				// "--batch", "64",
+				"--mirror", "1",
+				// "--snap", "100",
+				// "--restart_every", "0"
+			]
+		},
+
+		{
 			"name": "Python: Current File",
 			"type": "python",
 			"request": "launch",
@@ -14,9 +34,11 @@
 			"args": [
 				"--outdir", "output/debug",
 				"--cfg", "fastgan_enc",
-				"--data", "datasets/pokemon/pokemon-1k-128x128.zip",
-				"--gpus", "2",
-				"--batch", "64",
+				"--data", "datasets/art-painting/art-painting-1k-128x128.zip",
+				"--gpus", "4",
+				"--batch", "128",
+				// "--gpus", "1",
+				// "--batch", "32",
 				"--mirror", "1",
 				"--snap", "100",
 				"--restart_every", "0"

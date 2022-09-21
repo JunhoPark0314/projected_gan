@@ -112,9 +112,9 @@ class ProjectedGANPairLoss(Loss):
         self.warmup_nimg = 10 * 2**10 
 
     def run_G(self, real_img, z, c, update_emas=False):
-        h, ws = self.G.mapping(real_img, z, c, update_emas=update_emas)
+        h, ws, scale = self.G.mapping(real_img, z, c, update_emas=update_emas)
         high, low = self.G.synthesis(h, ws, c, update_emas=False)
-        return high, low
+        return high, low, scale.squeeze()[:,None]
 
     def run_D(self, high, low, c, blur_sigma=0, update_emas=False):
         blur_size = np.floor(blur_sigma * 3)
@@ -150,11 +150,11 @@ class ProjectedGANPairLoss(Loss):
 
             # Gmain: Maximize logits for generated images.
             with torch.autograd.profiler.record_function('Gmain_forward'):
-                gen_img_high, gen_img_low = self.run_G(real_img, gen_z, gen_c)
+                gen_img_high, gen_img_low, scale = self.run_G(real_img, gen_z, gen_c)
                 gen_logits = self.run_D(gen_img_high, gen_img_low, gen_c, blur_sigma=blur_sigma)
                 loss_Gmain = (-gen_logits).mean()
                 gen_pair_logits = self.run_E(gen_img_low, real_img_low)
-                loss_Gpair = (-gen_pair_logits).mean() * warmup
+                loss_Gpair = (F.relu(torch.ones_like(gen_pair_logits) * (scale + 0.1) - gen_pair_logits)).mean() * warmup
 
                 # Logging
                 training_stats.report('Loss/scores/fake', gen_logits)
@@ -169,11 +169,11 @@ class ProjectedGANPairLoss(Loss):
 
             # Dmain: Minimize logits for generated images.
             with torch.autograd.profiler.record_function('Dgen_forward'):
-                gen_img_high, gen_img_low = self.run_G(real_img, gen_z, gen_c, update_emas=True)
+                gen_img_high, gen_img_low, scale = self.run_G(real_img, gen_z, gen_c, update_emas=True)
                 gen_logits = self.run_D(gen_img_high, gen_img_low, gen_c, blur_sigma=blur_sigma)
                 loss_Dgen = (F.relu(torch.ones_like(gen_logits) + gen_logits)).mean()
                 gen_pair_logits = self.run_E(gen_img_low, real_img_low)
-                loss_Dpair_gen = (F.relu(torch.ones_like(gen_pair_logits) + gen_pair_logits)).mean() * warmup
+                loss_Dpair_gen = (F.relu(torch.ones_like(gen_pair_logits) * (scale + 0.1) + gen_pair_logits)).mean() * warmup
 
                 # Logging
                 training_stats.report('Loss/scores/fake', gen_logits)

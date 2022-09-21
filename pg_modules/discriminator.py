@@ -200,7 +200,8 @@ class ProjectedPairDiscriminator(torch.nn.Module):
         self.interp224 = interp224
         self.feature_network = F_RandomProj(**backbone_kwargs)
         self.discriminator = MultiScaleD(
-            channels=[f*2 for f in self.feature_network.CHANNELS],
+            #channels=[f*2 for f in self.feature_network.CHANNELS],
+            channels=self.feature_network.CHANNELS,
             resolutions=self.feature_network.RESOLUTIONS,
             **backbone_kwargs,
         )
@@ -209,6 +210,10 @@ class ProjectedPairDiscriminator(torch.nn.Module):
             resolutions=self.feature_network.RESOLUTIONS,
             **backbone_kwargs,
         )
+        self.pair_norm = nn.ModuleDict({
+            str(i): nn.InstanceNorm2d(f, affine=False)
+            for i, (f, r) in enumerate(zip(self.feature_network.CHANNELS, [112, 56, 28, 14]))
+        })
 
     def train(self, mode=True):
         self.feature_network = self.feature_network.train(False)
@@ -221,14 +226,16 @@ class ProjectedPairDiscriminator(torch.nn.Module):
     def forward(self, high, low, c):
         interp = max(224, high.shape[2])
         high = F.interpolate(high, interp, mode='bilinear', align_corners=False)
-        low = F.interpolate(low, interp, mode='bilinear', align_corners=False)
+        #low = F.interpolate(low, interp, mode='bilinear', align_corners=False)
 
         if self.diffaug:
-            high, low = DiffAugment_pair(high, low, policy='color,translation,cutout')
+            #high, low = DiffAugment_pair(high, low, policy='color,translation,cutout')
+            high = DiffAugment(high, policy='color,translation,cutout')
 
-        x = torch.cat([high, low])
+        #x = torch.cat([high, low])
+        x = high
         features = self.feature_network(x)
-        features = {k:torch.cat(torch.chunk(v, 2, 0), 1) for k,v in features.items()}
+        #features = {k:torch.cat(torch.chunk(v, 2, 0), 1) for k,v in features.items()}
         logits = self.discriminator(features, c)
 
         return logits
@@ -241,6 +248,7 @@ class ProjectedPairDiscriminator(torch.nn.Module):
         x = F.interpolate(x, 224, mode='bilinear', align_corners=False)
         
         features = self.feature_network(x)
+        features = {k: self.pair_norm[k](v) for k,v in features.items()}
         features = {k:torch.cat(torch.chunk(v, 2, 0), 1) for k,v in features.items()}
 
         logits = self.pair_discriminator(features, c)
