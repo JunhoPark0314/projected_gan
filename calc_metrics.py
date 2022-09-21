@@ -23,6 +23,7 @@ from torch_utils import training_stats
 from torch_utils import custom_ops
 from torch_utils import misc
 from torch_utils.ops import conv2d_gradfix
+from train_iter import init_dataset_kwargs
 
 #----------------------------------------------------------------------------
 
@@ -51,20 +52,29 @@ def subprocess_fn(rank, args, temp_dir):
     torch.backends.cudnn.allow_tf32 = False
     conv2d_gradfix.enabled = True
 
+    batch_gen = 4
+
+
+    data_loader_kwargs = dnnlib.EasyDict(pin_memory=True, prefetch_factor=2, num_workers=3)
+    training_set = dnnlib.util.construct_class_by_name(**args.dataset_kwargs) # subclass of training.dataset.Dataset
+    evaluation_set_sampler = misc.InfiniteSampler(dataset=training_set, rank=rank, num_replicas=args.num_gpus, seed=0)
+    evaluation_set_iterator = iter(torch.utils.data.DataLoader(dataset=training_set, sampler=evaluation_set_sampler, batch_size=batch_gen, **data_loader_kwargs))
+
     # Print network summary.
     G = copy.deepcopy(args.G).eval().requires_grad_(False).to(device)
     if rank == 0 and args.verbose:
-        z = torch.empty([1, G.z_dim], device=device)
-        c = torch.empty([1, G.c_dim], device=device)
-        misc.print_module_summary(G, [z, c])
-
+        x = torch.empty([2, 3, args.dataset_kwargs.resolution, args.dataset_kwargs.resolution], device=device)
+        z = torch.empty([2, G.z_dim], device=device)
+        c = torch.empty([2, G.c_dim], device=device)
+        misc.print_module_summary(G, [x, z, c])
+    
     # Calculate each metric.
     for metric in args.metrics:
         if rank == 0 and args.verbose:
             print(f'Calculating {metric}...')
         progress = metric_utils.ProgressMonitor(verbose=args.verbose)
         result_dict = metric_main.calc_metric(metric=metric, G=G, dataset_kwargs=args.dataset_kwargs,
-            num_gpus=args.num_gpus, rank=rank, device=device, progress=progress, snapshot_pkl=args.network_pkl)
+            num_gpus=args.num_gpus, rank=rank, device=device, progress=progress, snapshot_pkl=args.network_pkl, data_iter=evaluation_set_iterator)
         if rank == 0:
             metric_main.report_metric(result_dict, run_dir=args.run_dir, snapshot_pkl=args.network_pkl)
         if rank == 0 and args.verbose:

@@ -4,6 +4,7 @@
 #
 import torch.nn as nn
 from pg_modules.blocks import (DownBlock, InitLayer, UpBlockBig, UpBlockBigCond, UpBlockSmall, UpBlockSmallCond, SEBlock, conv2d)
+import torch
 
 
 def normalize_second_moment(x, dim=1, eps=1e-8):
@@ -33,7 +34,7 @@ class FastganSynthesis(nn.Module):
 
         # layers
         self.init = InitLayer(z_dim, channel=nfc[2], sz=4)
-        self.h_proj = nn.Conv2d(256, nfc[8], 1)
+        self.h_proj = nn.Conv2d(32, nfc[16], 1)
 
         UpBlock = UpBlockSmall if lite else UpBlockBig
 
@@ -62,8 +63,8 @@ class FastganSynthesis(nn.Module):
         input = normalize_second_moment(input[:, 0])
 
         feat_4 = self.init(input) 
-        feat_8 = self.feat_8(feat_4) + self.h_proj(h)
-        feat_16 = self.feat_16(feat_8) 
+        feat_8 = self.feat_8(feat_4) 
+        feat_16 = self.feat_16(feat_8) + self.h_proj(h)
         feat_32 = self.feat_32(feat_16)
 
         feat_64 = self.se_64(feat_4, self.feat_64(feat_32))
@@ -158,10 +159,10 @@ class Encoder(nn.Module):
         img_channels,
         hidden_ch = 128,
         z_dim=256,
-		out_ch=256,
+		out_ch=32,
     ):
         super().__init__()
-        num_layer = int(np.log2(img_resolution)) - 3
+        num_layer = int(np.log2(img_resolution)) - 4
         self.layers = []
         in_ch = img_channels
         hidden_ch = hidden_ch
@@ -169,11 +170,18 @@ class Encoder(nn.Module):
             self.layers.append(DownBlock(in_ch, hidden_ch))
             in_ch = hidden_ch
         self.layers.append(nn.Conv2d(hidden_ch, out_ch, 1, 1))
-        self.layers.append(nn.GroupNorm(32, out_ch))
+        self.layers.append(nn.InstanceNorm2d(out_ch, affine=False))
         self.layers = nn.Sequential(*self.layers)
 
     def forward(self, x, z, c, **kwargs):
-        return self.layers(x).squeeze(), z.unsqueeze(1)
+        enc = self.layers(x)
+        scale = torch.rand((x.shape[0], 1, 1, 1), device=x.device)
+        scale = kwargs.get("scale", scale)
+        temp_min, temp_max = kwargs.get("temp_min", 0.03), kwargs.get("temp_max", 1.0)
+        scale = scale.clip(min=temp_min, max=temp_max)
+        noise = torch.randn_like(enc, device=x.device)
+        out = enc * scale.sqrt() + noise * (1 - scale).sqrt()
+        return out, z.unsqueeze(1), scale.squeeze()
 
 class Generator(nn.Module):
     def __init__(
@@ -201,8 +209,8 @@ class Generator(nn.Module):
         self.synthesis = Synthesis(ngf=ngf, z_dim=z_dim, nc=img_channels, img_resolution=img_resolution, **synthesis_kwargs)
 
     def forward(self, x, z, c, return_small=False, **kwargs):
-        h, w = self.mapping(x, z, c)
+        h, w, scale = self.mapping(x, z, c, **kwargs)
         high_res, low_res = self.synthesis(h, w, c)
         if return_small:
-            return high_res, low_res
+            return high_res, low_res, scale
         return high_res
