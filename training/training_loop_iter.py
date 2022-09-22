@@ -390,8 +390,17 @@ def training_loop(
 
         # Save image snapshot.
         if (rank == 0) and (image_snapshot_ticks is not None) and (done or cur_tick % image_snapshot_ticks == 0):
-            images = torch.cat([G_ema(x=x, z=z, c=c, temp_min=0.03, temp_max=0.5, noise_mode='const').cpu() for x, z, c in zip(grid_x, grid_z, grid_c)]).numpy()
+            high_images = []
+            low_images = []
+            for i, (x, z, c) in enumerate(zip(grid_x, grid_z, grid_c)):
+                high, low, _, _ =G_ema(x=x, z=z, c=c, temp_min=i/len(grid_x), temp_max=(i+1)/len(grid_x), noise_mode='const', return_small=True)
+                high_images.append(high.cpu())
+                low_images.append(low.cpu())
+
+            images = torch.cat(high_images).numpy()
+            small_images = torch.cat(low_images).numpy()
             save_image_grid(images, os.path.join(run_dir, f'fakes{cur_nimg//1000:06d}.png'), drange=[-1,1], grid_size=grid_size)
+            save_image_grid(small_images, os.path.join(run_dir, f'fakes{cur_nimg//1000:06d}_small.png'), drange=[-1,1], grid_size=grid_size)
 
         # Save network snapshot.
         snapshot_pkl = None

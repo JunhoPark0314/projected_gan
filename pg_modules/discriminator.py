@@ -84,13 +84,15 @@ class SingleDiscScond(nn.Module):
         if head:
             layers += [conv2d(nc, nfc[256], 3, 1, 1, bias=False),
                        nn.LeakyReLU(0.2, inplace=True)]
-            semb_layer += [nn.Linear(self.temb_ch, nfc[256]*2)]
+            # semb_layer += [nn.Linear(self.temb_ch, nfc[256]*2)]
+            semb_layer += [nn.Linear(self.temb_ch, nfc[256])]
 
         # Down Blocks
         DB = partial(DownBlockPatch, separable=separable) if patch else partial(DownBlock, separable=separable)
         while start_sz > end_sz:
             layers.append(DB(nfc[start_sz],  nfc[start_sz//2]))
-            semb_layer += [nn.Linear(self.temb_ch, nfc[start_sz//2]*2)]
+            # semb_layer += [nn.Linear(self.temb_ch, nfc[start_sz//2]*2)]
+            semb_layer += [nn.Linear(self.temb_ch, nfc[start_sz//2])]
             start_sz = start_sz // 2
 
         layers.append(conv2d(nfc[end_sz], 1, 4, 1, 0, bias=False))
@@ -101,8 +103,9 @@ class SingleDiscScond(nn.Module):
         h = x
         for main_layer, semb_layer in zip(self.main, self.semb):
             h = main_layer(h)
-            s_scale, s_bias = torch.chunk(semb_layer(semb), 2, 1)
-            h = h * s_scale[...,None, None] + s_bias[...,None,None]
+            # s_scale, s_bias = torch.chunk(semb_layer(semb), 2, 1)
+            s_bias = semb_layer(semb)
+            h = h + s_bias[...,None,None]
         return self.main[-1](h)
 
 
@@ -263,7 +266,7 @@ class ProjectedPairDiscriminator(torch.nn.Module):
             **backbone_kwargs,
         )
         self.pair_discriminator = MultiScaleD(
-            channels=[f * 2 for f in self.feature_network.CHANNELS],
+            channels=[f + 32 for f in self.feature_network.CHANNELS],
             resolutions=self.feature_network.RESOLUTIONS,
             scond=1,
             **backbone_kwargs,
@@ -305,7 +308,8 @@ class ProjectedPairDiscriminator(torch.nn.Module):
         return logits
 
     def pair_disc(self, x1, x2, scale=None, c=None):
-        x = torch.cat([x1, x2])
+        # x = torch.cat([x1, x2])
+        x = x1
         x = DiffAugment(x, policy='color,translation,cutout')
 
         #if self.interp224:
@@ -316,16 +320,16 @@ class ProjectedPairDiscriminator(torch.nn.Module):
         pair_features = {}
         semb = get_timestep_embedding(scale.squeeze() * 100, self.temb_ch)
         semb = self.scale_proj(semb)
-        if scale is not None:
-            scale = scale.reshape(-1, 1, 1, 1)
-            for k, v in features.items():
-                x1_feat, x2_feat = torch.chunk(v, 2, 0)
-                # x1_feat = x1_feat * scale.sqrt() + torch.randn_like(x1_feat) * (1 - scale).sqrt()
-                # ch_proj = torch.randn((x1_feat.shape[1], x1_feat.shape[1]), device=x1_feat.device)
-                # x1_feat = torch.einsum("bchw,ck->bkhw",x1_feat, ch_proj)
-                pair_features[k] = torch.cat([x1_feat, x2_feat], 1)
-        else:
-            pair_features = {k:torch.cat(torch.chunk(v, 2, 0), 1) for k,v in features.items()}
+
+        # scale = scale.reshape(-1, 1, 1, 1)
+        for k, v in features.items():
+            x1_feat = self.pair_norm[k](v)
+            x2_feat = torch.nn.functional.interpolate(x2, size=(x1_feat.shape[2], x1_feat.shape[2]), mode='bilinear')
+            # x1_feat, x2_feat = torch.chunk(v, 2, 0)
+            # x1_feat = x1_feat * scale.sqrt() + torch.randn_like(x1_feat) * (1 - scale).sqrt()
+            # ch_proj = torch.randn((x1_feat.shape[1], x1_feat.shape[1]), device=x1_feat.device)
+            # x1_feat = torch.einsum("bchw,ck->bkhw",x1_feat, ch_proj)
+            pair_features[k] = torch.cat([x1_feat, x2_feat], 1)
 
         logits = self.pair_discriminator(pair_features, c, semb)
 

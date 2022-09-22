@@ -36,13 +36,13 @@ class FastganSynthesis(nn.Module):
         # layers
         self.init = InitLayer(z_dim, channel=nfc[2], sz=4)
         self.h_proj = nn.Conv2d(32, nfc[8], 1)
-        self.h_proj = nn.parameter.Parameter(torch.randn((32, nfc[8])))
-        self.h_gain = 1 / np.sqrt(nfc[8])
+        # self.h_proj = nn.parameter.Parameter(torch.randn((32, nfc[8])))
+        # self.h_gain = 1 / np.sqrt(32)
         # self.se_proj =SEBlock(nfc[4], nfc[8])
         self.scale_proj = nn.Sequential(*[
             nn.Linear(self.temb_ch, 512),
             nn.LeakyReLU(0.2, inplace=True),
-            nn.Linear(512, nfc[8]*2)
+            nn.Linear(512, nfc[4]*2)
         ])
 
         UpBlock = UpBlockSmall if lite else UpBlockBig
@@ -54,6 +54,7 @@ class FastganSynthesis(nn.Module):
         self.feat_128 = UpBlock(nfc[64], nfc[128])
         self.feat_256 = UpBlock(nfc[128], nfc[256])
 
+        self.se_proj = SEBlock(nfc[4], nfc[8])
         self.se_64  = SEBlock(nfc[4], nfc[64])
         self.se_128 = SEBlock(nfc[8], nfc[128])
         self.se_256 = SEBlock(nfc[16], nfc[256])
@@ -74,9 +75,13 @@ class FastganSynthesis(nn.Module):
         t_scale, t_bias = torch.chunk(self.scale_proj(temb), 2, 1)
         # input = input * t_scale + t_bias
 
+
         feat_4 = self.init(input) 
-        feat_8 = self.feat_8(feat_4) + torch.einsum('bchw,ck->bkhw', h, self.h_proj * self.h_gain) * t_scale[...,None, None] + t_bias[...,None,None]
-        feat_16 = self.feat_16(feat_8)
+        h_proj = self.h_proj(h) 
+        h_proj = self.se_proj(feat_4 * t_scale[...,None,None] + t_bias[...,None,None], h_proj)
+        # feat_8 = self.feat_8(feat_4) + torch.einsum('bchw,ck->bkhw', h, self.h_proj * self.h_gain) + t_bias[...,None,None]
+        feat_8 = self.feat_8(feat_4) #+ t_bias[...,None,None]
+        feat_16 = self.feat_16(feat_8 + h_proj)
         feat_32 = self.feat_32(feat_16)
 
         feat_64 = self.se_64(feat_4, self.feat_64(feat_32))
@@ -94,7 +99,8 @@ class FastganSynthesis(nn.Module):
         if self.img_resolution >= 1024:
             feat_last = self.feat_1024(feat_last)
 
-        return self.to_big(feat_last), self.to_small(feat_32)
+        out = self.to_big(feat_last)
+        return out, self.to_small(feat_32), h
 
 
 class FastganSynthesisCond(nn.Module):
@@ -193,8 +199,8 @@ class Encoder(nn.Module):
         temp_min, temp_max = kwargs.get("temp_min", 0.03), kwargs.get("temp_max", 1.0)
         scale = scale.clip(min=temp_min, max=temp_max)
         noise = torch.randn_like(enc, device=x.device)
-        ch_proj = torch.randn((self.out_ch, self.out_ch), device=x.device)
-        enc = torch.einsum("bchw,ck->bkhw",enc, ch_proj)
+        # ch_proj = torch.randn((self.out_ch, self.out_ch), device=x.device)
+        # enc = torch.einsum("bchw,ck->bkhw",enc, ch_proj)
 
         out = (enc * scale.sqrt() + noise * (1 - scale).sqrt())
         return out, z.unsqueeze(1), scale.squeeze()
@@ -226,7 +232,7 @@ class Generator(nn.Module):
 
     def forward(self, x, z, c, return_small=False, **kwargs):
         h, w, scale = self.mapping(x, z, c, **kwargs)
-        high_res, low_res = self.synthesis(h, w, c, scale)
+        high_res, low_res, h_proj = self.synthesis(h, w, c, scale)
         if return_small:
-            return high_res, low_res, scale
+            return high_res, low_res, scale, h_proj.detach()
         return high_res
