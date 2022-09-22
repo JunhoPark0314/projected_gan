@@ -255,6 +255,8 @@ class ProjectedPairDiscriminator(torch.nn.Module):
             for k, v in features.items():
                 x1_feat, x2_feat = torch.chunk(v, 2, 0)
                 x1_feat = x1_feat * scale.sqrt() + torch.randn_like(x1_feat) * (1 - scale).sqrt()
+                ch_proj = torch.randn_like((x1_feat.shape[1], x1_feat.shape[1]), device=x1_feat.device)
+                x1_feat = torch.einsum("bchw,ck->bkhw",x1_feat, ch_proj)
                 pair_features[k] = torch.cat([x1_feat, x2_feat], 1)
         else:
             pair_features = {k:torch.cat(torch.chunk(v, 2, 0), 1) for k,v in features.items()}

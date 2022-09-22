@@ -162,6 +162,7 @@ class Encoder(nn.Module):
 		out_ch=32,
     ):
         super().__init__()
+        self.out_ch = out_ch
         num_layer = int(np.log2(img_resolution)) - 4
         self.layers = []
         in_ch = img_channels
@@ -180,7 +181,9 @@ class Encoder(nn.Module):
         temp_min, temp_max = kwargs.get("temp_min", 0.03), kwargs.get("temp_max", 1.0)
         scale = scale.clip(min=temp_min, max=temp_max)
         noise = torch.randn_like(enc, device=x.device)
-        out = enc * scale.sqrt() + noise * (1 - scale).sqrt()
+        out = (enc * scale.sqrt() + noise * (1 - scale).sqrt())
+        ch_proj = torch.randn_like((self.out_ch, self.out_ch), device=x.device)
+        out = torch.einsum("bchw,ck->bkhw",out, ch_proj)
         return out, z.unsqueeze(1), scale.squeeze()
 
 class Generator(nn.Module):
