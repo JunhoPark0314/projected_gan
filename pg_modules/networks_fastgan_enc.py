@@ -19,7 +19,6 @@ class DummyMapping(nn.Module):
     def forward(self, z, c, **kwargs):
         return z.unsqueeze(1)  # to fit the StyleGAN API
 
-
 class FastganSynthesis(nn.Module):
     def __init__(self, ngf=128, z_dim=256, nc=3, img_resolution=256, lite=False):
         super().__init__()
@@ -36,11 +35,14 @@ class FastganSynthesis(nn.Module):
 
         # layers
         self.init = InitLayer(z_dim, channel=nfc[2], sz=4)
-        self.h_proj = nn.Conv2d(32, nfc[16], 1)
+        self.h_proj = nn.Conv2d(32, nfc[8], 1)
+        self.h_proj = nn.parameter.Parameter(torch.randn((32, nfc[8])))
+        self.h_gain = 1 / np.sqrt(nfc[8])
+        # self.se_proj =SEBlock(nfc[4], nfc[8])
         self.scale_proj = nn.Sequential(*[
             nn.Linear(self.temb_ch, 512),
             nn.LeakyReLU(0.2, inplace=True),
-            nn.Linear(512, z_dim*2)
+            nn.Linear(512, nfc[8]*2)
         ])
 
         UpBlock = UpBlockSmall if lite else UpBlockBig
@@ -70,11 +72,11 @@ class FastganSynthesis(nn.Module):
         input = normalize_second_moment(input[:, 0])
         temb = get_timestep_embedding(scale.squeeze() * 100, self.temb_ch)
         t_scale, t_bias = torch.chunk(self.scale_proj(temb), 2, 1)
-        input = input * t_scale + t_bias
+        # input = input * t_scale + t_bias
 
         feat_4 = self.init(input) 
-        feat_8 = self.feat_8(feat_4) 
-        feat_16 = self.feat_16(feat_8) + self.h_proj(h)
+        feat_8 = self.feat_8(feat_4) + torch.einsum('bchw,ck->bkhw', h, self.h_proj * self.h_gain) * t_scale[...,None, None] + t_bias[...,None,None]
+        feat_16 = self.feat_16(feat_8)
         feat_32 = self.feat_32(feat_16)
 
         feat_64 = self.se_64(feat_4, self.feat_64(feat_32))
@@ -173,7 +175,7 @@ class Encoder(nn.Module):
     ):
         super().__init__()
         self.out_ch = out_ch
-        num_layer = int(np.log2(img_resolution)) - 4
+        num_layer = int(np.log2(img_resolution)) - 3
         self.layers = []
         in_ch = img_channels
         hidden_ch = hidden_ch
@@ -191,9 +193,10 @@ class Encoder(nn.Module):
         temp_min, temp_max = kwargs.get("temp_min", 0.03), kwargs.get("temp_max", 1.0)
         scale = scale.clip(min=temp_min, max=temp_max)
         noise = torch.randn_like(enc, device=x.device)
-        out = (enc * scale.sqrt() + noise * (1 - scale).sqrt())
         ch_proj = torch.randn((self.out_ch, self.out_ch), device=x.device)
-        out = torch.einsum("bchw,ck->bkhw",out, ch_proj)
+        enc = torch.einsum("bchw,ck->bkhw",enc, ch_proj)
+
+        out = (enc * scale.sqrt() + noise * (1 - scale).sqrt())
         return out, z.unsqueeze(1), scale.squeeze()
 
 class Generator(nn.Module):

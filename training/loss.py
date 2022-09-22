@@ -30,9 +30,9 @@ class ProjectedGANLoss(Loss):
         self.blur_init_sigma = blur_init_sigma
         self.blur_fade_kimg = blur_fade_kimg
 
-    def run_G(self, real_img, z, c, update_emas=False):
-        h, ws = self.G.mapping(real_img, z, c, update_emas=update_emas)
-        img = self.G.synthesis(h, ws, c, update_emas=False)
+    def run_G(self, z, c, update_emas=False):
+        ws = self.G.mapping(z, c, update_emas=update_emas)
+        img = self.G.synthesis(ws, c, update_emas=False)
         return img
 
     def run_D(self, img, c, blur_sigma=0, update_emas=False):
@@ -109,7 +109,7 @@ class ProjectedGANPairLoss(Loss):
         self.D = D
         self.blur_init_sigma = blur_init_sigma
         self.blur_fade_kimg = blur_fade_kimg
-        self.warmup_nimg = 10 * 2**10 
+        self.warmup_nimg = 10 * 2**12
 
     def run_G(self, real_img, z, c, update_emas=False):
         h, ws, scale = self.G.mapping(real_img, z, c, update_emas=update_emas)
@@ -141,7 +141,7 @@ class ProjectedGANPairLoss(Loss):
         loss_Gpair = 0
         loss_Dpair_gen = 0
         loss_Dpair_real = 0
-        warmup = max(min((cur_nimg - self.warmup_nimg) / self.warmup_nimg, 1), 0.001)
+        warmup = max(min((cur_nimg - self.warmup_nimg) / self.warmup_nimg, 1), 0)
 
         real_img_low = torch.nn.AdaptiveAvgPool2d((32, 32))(real_img)
         real_img_high = real_img

@@ -312,7 +312,7 @@ class ProjectedPairDiscriminator(torch.nn.Module):
         x = F.interpolate(x, 224, mode='bilinear', align_corners=False)
         
         features = self.feature_network(x)
-        features = {k: self.pair_norm[k](v) for k,v in features.items()}
+        # features = {k: self.pair_norm[k](v) for k,v in features.items()}
         pair_features = {}
         semb = get_timestep_embedding(scale.squeeze() * 100, self.temb_ch)
         semb = self.scale_proj(semb)
