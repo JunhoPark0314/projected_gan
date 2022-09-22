@@ -113,7 +113,7 @@ class ProjectedGANPairLoss(Loss):
 
     def run_G(self, real_img, z, c, update_emas=False):
         h, ws, scale = self.G.mapping(real_img, z, c, update_emas=update_emas)
-        high, low = self.G.synthesis(h, ws, c, update_emas=False)
+        high, low = self.G.synthesis(h, ws, c, scale, update_emas=False)
         return high, low, scale.squeeze()[:,None]
 
     def run_D(self, high, low, c, blur_sigma=0, update_emas=False):

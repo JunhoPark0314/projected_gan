@@ -3,6 +3,7 @@
 # modified by Axel Sauer for "Projected GANs Converge Faster"
 #
 import torch.nn as nn
+from ddim.models.diffusion import get_timestep_embedding
 from pg_modules.blocks import (DownBlock, InitLayer, UpBlockBig, UpBlockBigCond, UpBlockSmall, UpBlockSmallCond, SEBlock, conv2d)
 import torch
 
@@ -24,6 +25,7 @@ class FastganSynthesis(nn.Module):
         super().__init__()
         self.img_resolution = img_resolution
         self.z_dim = z_dim
+        self.temb_ch =512
 
         # channel multiplier
         nfc_multi = {2: 16, 4:16, 8:8, 16:4, 32:2, 64:2, 128:1, 256:0.5,
@@ -35,6 +37,11 @@ class FastganSynthesis(nn.Module):
         # layers
         self.init = InitLayer(z_dim, channel=nfc[2], sz=4)
         self.h_proj = nn.Conv2d(32, nfc[16], 1)
+        self.scale_proj = nn.Sequential(*[
+            nn.Linear(self.temb_ch, 512),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Linear(512, z_dim*2)
+        ])
 
         UpBlock = UpBlockSmall if lite else UpBlockBig
 
@@ -58,9 +65,12 @@ class FastganSynthesis(nn.Module):
         if img_resolution > 512:
             self.feat_1024 = UpBlock(nfc[512], nfc[1024])
 
-    def forward(self, h, input, c, **kwargs):
+    def forward(self, h, input, c, scale, **kwargs):
         # map noise to hypersphere as in "Progressive Growing of GANS"
         input = normalize_second_moment(input[:, 0])
+        temb = get_timestep_embedding(scale.squeeze() * 100, self.temb_ch)
+        t_scale, t_bias = torch.chunk(self.scale_proj(temb), 2, 1)
+        input = input * t_scale + t_bias
 
         feat_4 = self.init(input) 
         feat_8 = self.feat_8(feat_4) 
@@ -182,7 +192,7 @@ class Encoder(nn.Module):
         scale = scale.clip(min=temp_min, max=temp_max)
         noise = torch.randn_like(enc, device=x.device)
         out = (enc * scale.sqrt() + noise * (1 - scale).sqrt())
-        ch_proj = torch.randn_like((self.out_ch, self.out_ch), device=x.device)
+        ch_proj = torch.randn((self.out_ch, self.out_ch), device=x.device)
         out = torch.einsum("bchw,ck->bkhw",out, ch_proj)
         return out, z.unsqueeze(1), scale.squeeze()
 
@@ -213,7 +223,7 @@ class Generator(nn.Module):
 
     def forward(self, x, z, c, return_small=False, **kwargs):
         h, w, scale = self.mapping(x, z, c, **kwargs)
-        high_res, low_res = self.synthesis(h, w, c)
+        high_res, low_res = self.synthesis(h, w, c, scale)
         if return_small:
             return high_res, low_res, scale
         return high_res

@@ -1,5 +1,6 @@
 from functools import partial
 import numpy as np
+from ddim.models.diffusion import get_timestep_embedding
 from pg_modules.diffaug_pair import DiffAugment_pair
 import torch
 import torch.nn as nn
@@ -49,8 +50,60 @@ class SingleDisc(nn.Module):
         layers.append(conv2d(nfc[end_sz], 1, 4, 1, 0, bias=False))
         self.main = nn.Sequential(*layers)
 
-    def forward(self, x, c):
+    def forward(self, x, c, scale):
         return self.main(x)
+
+class SingleDiscScond(nn.Module):
+    def __init__(self, nc=None, ndf=None, start_sz=256, end_sz=8, head=None, separable=False, patch=False):
+        super().__init__()
+        channel_dict = {4: 512, 8: 512, 16: 256, 32: 128, 64: 64, 128: 64,
+                        256: 32, 512: 16, 1024: 8}
+
+        # interpolate for start sz that are not powers of two
+        if start_sz not in channel_dict.keys():
+            sizes = np.array(list(channel_dict.keys()))
+            start_sz = sizes[np.argmin(abs(sizes - start_sz))]
+        self.start_sz = start_sz
+        self.temb_ch = 512
+
+        # if given ndf, allocate all layers with the same ndf
+        if ndf is None:
+            nfc = channel_dict
+        else:
+            nfc = {k: ndf for k, v in channel_dict.items()}
+
+        # for feature map discriminators with nfc not in channel_dict
+        # this is the case for the pretrained backbone (midas.pretrained)
+        if nc is not None and head is None:
+            nfc[start_sz] = nc
+
+        layers = []
+        semb_layer = []
+
+        # Head if the initial input is the full modality
+        if head:
+            layers += [conv2d(nc, nfc[256], 3, 1, 1, bias=False),
+                       nn.LeakyReLU(0.2, inplace=True)]
+            semb_layer += [nn.Linear(self.temb_ch, nfc[256]*2)]
+
+        # Down Blocks
+        DB = partial(DownBlockPatch, separable=separable) if patch else partial(DownBlock, separable=separable)
+        while start_sz > end_sz:
+            layers.append(DB(nfc[start_sz],  nfc[start_sz//2]))
+            semb_layer += [nn.Linear(self.temb_ch, nfc[start_sz//2]*2)]
+            start_sz = start_sz // 2
+
+        layers.append(conv2d(nfc[end_sz], 1, 4, 1, 0, bias=False))
+        self.main = nn.ModuleList(layers)
+        self.semb = nn.ModuleList(semb_layer)
+
+    def forward(self, x, c, semb):
+        h = x
+        for main_layer, semb_layer in zip(self.main, self.semb):
+            h = main_layer(h)
+            s_scale, s_bias = torch.chunk(semb_layer(semb), 2, 1)
+            h = h * s_scale[...,None, None] + s_bias[...,None,None]
+        return self.main[-1](h)
 
 
 class SingleDiscCond(nn.Module):
@@ -120,6 +173,7 @@ class MultiScaleD(nn.Module):
         num_discs=1,
         proj_type=2,  # 0 = no projection, 1 = cross channel mixing, 2 = cross scale mixing
         cond=0,
+        scond=0,
         separable=False,
         patch=False,
         **kwargs,
@@ -132,6 +186,7 @@ class MultiScaleD(nn.Module):
         self.disc_in_channels = channels[:num_discs]
         self.disc_in_res = resolutions[:num_discs]
         Disc = SingleDiscCond if cond else SingleDisc
+        Disc = SingleDiscScond if scond else SingleDisc
 
         mini_discs = []
         for i, (cin, res) in enumerate(zip(self.disc_in_channels, self.disc_in_res)):
@@ -139,10 +194,10 @@ class MultiScaleD(nn.Module):
             mini_discs += [str(i), Disc(nc=cin, start_sz=start_sz, end_sz=8, separable=separable, patch=patch)],
         self.mini_discs = nn.ModuleDict(mini_discs)
 
-    def forward(self, features, c):
+    def forward(self, features, c, scale=None):
         all_logits = []
         for k, disc in self.mini_discs.items():
-            all_logits.append(disc(features[k], c).view(features[k].size(0), -1))
+            all_logits.append(disc(features[k], c, scale).view(features[k].size(0), -1))
 
         all_logits = torch.cat(all_logits, dim=1)
         return all_logits
@@ -199,6 +254,8 @@ class ProjectedPairDiscriminator(torch.nn.Module):
         self.diffaug = diffaug
         self.interp224 = interp224
         self.feature_network = F_RandomProj(**backbone_kwargs)
+        self.temb_ch = 512
+
         self.discriminator = MultiScaleD(
             #channels=[f*2 for f in self.feature_network.CHANNELS],
             channels=self.feature_network.CHANNELS,
@@ -208,16 +265,23 @@ class ProjectedPairDiscriminator(torch.nn.Module):
         self.pair_discriminator = MultiScaleD(
             channels=[f * 2 for f in self.feature_network.CHANNELS],
             resolutions=self.feature_network.RESOLUTIONS,
+            scond=1,
             **backbone_kwargs,
         )
         self.pair_norm = nn.ModuleDict({
             str(i): nn.InstanceNorm2d(f, affine=False)
             for i, (f, r) in enumerate(zip(self.feature_network.CHANNELS, [112, 56, 28, 14]))
         })
+        self.scale_proj = nn.Sequential(*[
+            nn.Linear(self.temb_ch, 512),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Linear(512, 512)
+        ])
 
     def train(self, mode=True):
         self.feature_network = self.feature_network.train(False)
         self.discriminator = self.discriminator.train(mode)
+        self.scale_proj = self.scale_proj.train(mode)
         return self
 
     def eval(self):
@@ -250,17 +314,19 @@ class ProjectedPairDiscriminator(torch.nn.Module):
         features = self.feature_network(x)
         features = {k: self.pair_norm[k](v) for k,v in features.items()}
         pair_features = {}
+        semb = get_timestep_embedding(scale.squeeze() * 100, self.temb_ch)
+        semb = self.scale_proj(semb)
         if scale is not None:
             scale = scale.reshape(-1, 1, 1, 1)
             for k, v in features.items():
                 x1_feat, x2_feat = torch.chunk(v, 2, 0)
-                x1_feat = x1_feat * scale.sqrt() + torch.randn_like(x1_feat) * (1 - scale).sqrt()
-                ch_proj = torch.randn_like((x1_feat.shape[1], x1_feat.shape[1]), device=x1_feat.device)
-                x1_feat = torch.einsum("bchw,ck->bkhw",x1_feat, ch_proj)
+                # x1_feat = x1_feat * scale.sqrt() + torch.randn_like(x1_feat) * (1 - scale).sqrt()
+                # ch_proj = torch.randn((x1_feat.shape[1], x1_feat.shape[1]), device=x1_feat.device)
+                # x1_feat = torch.einsum("bchw,ck->bkhw",x1_feat, ch_proj)
                 pair_features[k] = torch.cat([x1_feat, x2_feat], 1)
         else:
             pair_features = {k:torch.cat(torch.chunk(v, 2, 0), 1) for k,v in features.items()}
 
-        logits = self.pair_discriminator(pair_features, c)
+        logits = self.pair_discriminator(pair_features, c, semb)
 
         return logits
