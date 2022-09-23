@@ -166,8 +166,8 @@ class ProjectedGANPairLoss(Loss):
                 gen_logits = self.run_D(gen_img_high, gen_img_low, gen_c, blur_sigma=blur_sigma)
                 loss_Gmain = (-gen_logits).mean()
                 gen_pair_logits = self.run_E(gen_img_low, h_proj, scale)
-                loss_Gpair = (F.relu(torch.ones_like(gen_pair_logits) * (scale) - gen_pair_logits)).mean()
-                # loss_Gpair = (-gen_pair_logits).mean() * warmup
+                # loss_Gpair = (F.relu(torch.ones_like(gen_pair_logits) * (scale) - gen_pair_logits)).mean()
+                loss_Gpair = (-gen_pair_logits).mean() * warmup
 
                 # Logging
                 training_stats.report('Loss/scores/fake', gen_logits)
@@ -186,8 +186,8 @@ class ProjectedGANPairLoss(Loss):
                 gen_logits = self.run_D(gen_img_high, gen_img_low, gen_c, blur_sigma=blur_sigma)
                 loss_Dgen = (F.relu(torch.ones_like(gen_logits) + gen_logits)).mean()
                 gen_pair_logits = self.run_E(gen_img_low, h_proj, scale)
-                loss_Dpair_gen = (F.relu(torch.ones_like(gen_pair_logits) * (scale) + gen_pair_logits)).mean()
-                # loss_Dpair_gen = (F.relu(torch.ones_like(gen_pair_logits) + gen_pair_logits)).mean() * warmup
+                # loss_Dpair_gen = (F.relu(torch.ones_like(gen_pair_logits) * (scale) + gen_pair_logits)).mean()
+                loss_Dpair_gen = (F.relu(torch.ones_like(gen_pair_logits) + gen_pair_logits)).mean() * warmup
 
                 # Logging
                 training_stats.report('Loss/scores/fake', gen_logits)
@@ -203,8 +203,8 @@ class ProjectedGANPairLoss(Loss):
                 real_logits = self.run_D(real_img_high_tmp, real_img_low_tmp, real_c, blur_sigma=blur_sigma)
                 loss_Dreal = (F.relu(torch.ones_like(real_logits) - real_logits)).mean()
                 real_pair_logits = self.run_E(real_img_low_tmp, h_proj, scale)
-                loss_Dpair_real = (F.relu(torch.ones_like(real_pair_logits) * (scale) - real_pair_logits)).mean()
-                # loss_Dpair_real = (F.relu(torch.ones_like(real_pair_logits) - real_pair_logits)).mean() * warmup
+                # loss_Dpair_real = (F.relu(torch.ones_like(real_pair_logits) * (scale) - real_pair_logits)).mean()
+                loss_Dpair_real = (F.relu(torch.ones_like(real_pair_logits) - real_pair_logits)).mean() * warmup
 
                 # Logging
                 training_stats.report('Loss/scores/real', real_logits)

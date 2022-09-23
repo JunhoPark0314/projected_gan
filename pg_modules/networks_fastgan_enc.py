@@ -47,12 +47,12 @@ class FastganSynthesis(nn.Module):
             nn.Linear(512, 512),
             nn.LeakyReLU(0.2, inplace=True),
         ])
-        self.scale_8 = nn.Linear(512, nfc[8])
+        self.scale_8 = nn.Linear(512, nfc[8] * 2)
         # self.scale_16 = nn.Linear(512, nfc[16])
 
         UpBlock = UpBlockSmall if lite else UpBlockBig
 
-        self.h_proj = BlockBig(32, nfc[16])
+        self.h_proj = BlockBig(32, nfc[8])
         self.feat_8   = UpBlock(nfc[4], nfc[8])
         self.feat_16  = UpBlock(nfc[8], nfc[16])
         self.feat_32  = UpBlock(nfc[16], nfc[32])
@@ -60,7 +60,7 @@ class FastganSynthesis(nn.Module):
         self.feat_128 = UpBlock(nfc[64], nfc[128])
         self.feat_256 = UpBlock(nfc[128], nfc[256])
 
-        self.se_proj = SEBlock(nfc[8], nfc[16])
+        self.se_proj = SEBlock(nfc[8], nfc[8])
         self.se_64  = SEBlock(nfc[4], nfc[64])
         self.se_128 = SEBlock(nfc[8], nfc[128])
         self.se_256 = SEBlock(nfc[16], nfc[256])
@@ -79,16 +79,19 @@ class FastganSynthesis(nn.Module):
         input = normalize_second_moment(input[:, 0])
         temb = get_timestep_embedding(scale.squeeze() * 100, self.temb_ch)
         temb = self.scale_proj(temb)
-        t_bias_8 = self.scale_8(temb)
+        t_scale_8, t_bias_8 = torch.chunk(self.scale_8(temb), 2, 1)
         # t_bias_16 = self.scale_16(temb)
 
         feat_4 = self.init(input) 
-        h_proj = self.se_proj(self.h_init(input) + t_bias_8[...,None,None], self.h_proj(h))
+        h_proj = self.h_proj(h)
         # h_proj = self.se_proj(feat_4 * t_scale[...,None,None] + t_bias[...,None,None], h_proj)
         # feat_8 = self.feat_8(feat_4) + torch.einsum('bchw,ck->bkhw', h, self.h_proj * self.h_gain) + t_bias[...,None,None]
         feat_8 = self.feat_8(feat_4) #+ t_bias[...,None,None]
+
+        feat_8 = self.se_proj(h_proj + t_bias_8[...,None,None], feat_8) + h_proj * t_scale_8.sigmoid()[...,None, None]
+
         feat_16 = self.feat_16(feat_8)
-        feat_32 = self.feat_32(feat_16 + h_proj)
+        feat_32 = self.feat_32(feat_16)
 
         feat_64 = self.se_64(feat_4, self.feat_64(feat_32))
         feat_128 = self.se_128(feat_8,  self.feat_128(feat_64))
@@ -187,7 +190,7 @@ class Encoder(nn.Module):
     ):
         super().__init__()
         self.out_ch = out_ch
-        num_layer = int(np.log2(img_resolution)) - 4
+        num_layer = int(np.log2(img_resolution)) - 3
         self.layers = []
         in_ch = img_channels
         hidden_ch = hidden_ch
