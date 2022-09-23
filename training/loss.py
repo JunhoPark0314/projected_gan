@@ -126,7 +126,7 @@ class ProjectedGANPairLoss(Loss):
         logits = self.D(x, x, c)
         return logits
     
-    def run_E(self, img1, img2, scale=None, blur_sigma=3):
+    def run_E(self, img1, img2, scale=None, blur_sigma=1):
         blur_size = np.floor(blur_sigma * 3)
         if blur_size > 0:
             with torch.autograd.profiler.record_function('blur'):

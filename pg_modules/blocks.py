@@ -110,9 +110,10 @@ def BlockBig(in_planes, out_planes):
         conv2d(in_planes, out_planes*2, 3, 1, 1, bias=False),
         NoiseInjection(),
         NormLayer(out_planes*2), GLU(),
+        AttnBlock(out_planes),
         conv2d(out_planes, out_planes*2, 3, 1, 1, bias=False),
         NoiseInjection(),
-        NormLayer(out_planes*2), GLU()
+        NormLayer(out_planes*2), GLU(),
         )
     return block
 
