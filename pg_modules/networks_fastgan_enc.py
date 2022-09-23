@@ -75,41 +75,42 @@ class FastganSynthesis(nn.Module):
             self.feat_1024 = UpBlock(nfc[512], nfc[1024])
 
     def forward(self, h, input, c, scale, **kwargs):
-        # map noise to hypersphere as in "Progressive Growing of GANS"
-        input = normalize_second_moment(input[:, 0])
-        temb = get_timestep_embedding(scale.squeeze() * 100, self.temb_ch)
-        temb = self.scale_proj(temb)
-        t_scale_8, t_bias_8 = torch.chunk(self.scale_8(temb), 2, 1)
-        # t_bias_16 = self.scale_16(temb)
+            # map noise to hypersphere as in "Progressive Growing of GANS"
+            input = normalize_second_moment(input[:, 0])
+            temb = get_timestep_embedding(scale.squeeze() * 100, self.temb_ch)
+            temb = self.scale_proj(temb)
+            t_scale_8, t_bias_8 = torch.chunk(self.scale_8(temb), 2, 1)
+            t_scale_8 = t_scale_8.sigmoid()[...,None,None]
+            # t_bias_16 = self.scale_16(temb)
 
-        feat_4 = self.init(input) 
-        h_proj = self.h_proj(h)
-        # h_proj = self.se_proj(feat_4 * t_scale[...,None,None] + t_bias[...,None,None], h_proj)
-        # feat_8 = self.feat_8(feat_4) + torch.einsum('bchw,ck->bkhw', h, self.h_proj * self.h_gain) + t_bias[...,None,None]
-        feat_8 = self.feat_8(feat_4) #+ t_bias[...,None,None]
+            feat_4 = self.init(input) 
+            h_proj = self.h_proj(h)
+            # h_proj = self.se_proj(feat_4 * t_scale[...,None,None] + t_bias[...,None,None], h_proj)
+            # feat_8 = self.feat_8(feat_4) + torch.einsum('bchw,ck->bkhw', h, self.h_proj * self.h_gain) + t_bias[...,None,None]
+            feat_8 = self.feat_8(feat_4) #+ t_bias[...,None,None]
 
-        feat_8 = self.se_proj(h_proj + t_bias_8[...,None,None], feat_8) + h_proj * t_scale_8.sigmoid()[...,None, None]
+            feat_8 = self.se_proj(h_proj + t_bias_8[...,None,None], feat_8) * (1 - t_scale_8).sqrt() + h_proj * t_scale_8.sqrt()
 
-        feat_16 = self.feat_16(feat_8)
-        feat_32 = self.feat_32(feat_16)
+            feat_16 = self.feat_16(feat_8)
+            feat_32 = self.feat_32(feat_16)
 
-        feat_64 = self.se_64(feat_4, self.feat_64(feat_32))
-        feat_128 = self.se_128(feat_8,  self.feat_128(feat_64))
+            feat_64 = self.se_64(feat_4, self.feat_64(feat_32))
+            feat_128 = self.se_128(feat_8,  self.feat_128(feat_64))
 
-        if self.img_resolution >= 128:
-            feat_last = feat_128
+            if self.img_resolution >= 128:
+                feat_last = feat_128
 
-        if self.img_resolution >= 256:
-            feat_last = self.se_256(feat_16, self.feat_256(feat_last))
+            if self.img_resolution >= 256:
+                feat_last = self.se_256(feat_16, self.feat_256(feat_last))
 
-        if self.img_resolution >= 512:
-            feat_last = self.se_512(feat_32, self.feat_512(feat_last))
+            if self.img_resolution >= 512:
+                feat_last = self.se_512(feat_32, self.feat_512(feat_last))
 
-        if self.img_resolution >= 1024:
-            feat_last = self.feat_1024(feat_last)
+            if self.img_resolution >= 1024:
+                feat_last = self.feat_1024(feat_last)
 
-        out = self.to_big(feat_last)
-        return out, self.to_small(feat_32), h
+            out = self.to_big(feat_last)
+            return out, self.to_small(feat_32), h
 
 
 class FastganSynthesisCond(nn.Module):
