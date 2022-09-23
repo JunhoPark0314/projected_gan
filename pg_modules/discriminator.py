@@ -54,7 +54,7 @@ class SingleDisc(nn.Module):
         return self.main(x)
 
 class SingleDiscScond(nn.Module):
-    def __init__(self, nc=None, ndf=None, start_sz=256, end_sz=8, head=None, separable=False, patch=False):
+    def __init__(self, nc=None, ndf=None, start_sz=256, end_sz=8, head=None, separable=False, patch=False, semb_ch=128):
         super().__init__()
         channel_dict = {4: 512, 8: 512, 16: 256, 32: 128, 64: 64, 128: 64,
                         256: 32, 512: 16, 1024: 8}
@@ -64,7 +64,7 @@ class SingleDiscScond(nn.Module):
             sizes = np.array(list(channel_dict.keys()))
             start_sz = sizes[np.argmin(abs(sizes - start_sz))]
         self.start_sz = start_sz
-        self.temb_ch = 512
+        self.temb_ch = semb_ch
 
         # if given ndf, allocate all layers with the same ndf
         if ndf is None:
@@ -258,11 +258,17 @@ class ProjectedPairDiscriminator(torch.nn.Module):
         self.interp224 = interp224
         self.feature_network = F_RandomProj(**backbone_kwargs)
         self.temb_ch = 512
+        self.scale_proj = nn.Sequential(*[
+            nn.Linear(self.temb_ch, 128),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Linear(128, 128)
+        ])
 
         self.discriminator = MultiScaleD(
             #channels=[f*2 for f in self.feature_network.CHANNELS],
             channels=self.feature_network.CHANNELS,
             resolutions=self.feature_network.RESOLUTIONS,
+            scond=1,
             **backbone_kwargs,
         )
         self.pair_discriminator = MultiScaleD(
@@ -275,11 +281,7 @@ class ProjectedPairDiscriminator(torch.nn.Module):
             str(i): nn.InstanceNorm2d(f, affine=False)
             for i, (f, r) in enumerate(zip(self.feature_network.CHANNELS, [112, 56, 28, 14]))
         })
-        self.scale_proj = nn.Sequential(*[
-            nn.Linear(self.temb_ch, 512),
-            nn.LeakyReLU(0.2, inplace=True),
-            nn.Linear(512, 512)
-        ])
+
 
     def train(self, mode=True):
         self.feature_network = self.feature_network.train(False)
@@ -290,20 +292,24 @@ class ProjectedPairDiscriminator(torch.nn.Module):
     def eval(self):
         return self.train(False)
 
-    def forward(self, high, low, c):
-        interp = max(224, high.shape[2])
-        high = F.interpolate(high, interp, mode='bilinear', align_corners=False)
-        #low = F.interpolate(low, interp, mode='bilinear', align_corners=False)
+    def forward(self, high, low, c, scale=None):
+        #high, low = DiffAugment_pair(high, low, policy='color,translation,cutout')
+        high = DiffAugment(high, policy='color,translation,cutout')
 
-        if self.diffaug:
-            #high, low = DiffAugment_pair(high, low, policy='color,translation,cutout')
-            high = DiffAugment(high, policy='color,translation,cutout')
+        # interp = max(224, high.shape[2])
+        high = F.interpolate(high, 224, mode='bilinear', align_corners=False)
+        #low = F.interpolate(low, interp, mode='bilinear', align_corners=False)
 
         #x = torch.cat([high, low])
         x = high
         features = self.feature_network(x)
         #features = {k:torch.cat(torch.chunk(v, 2, 0), 1) for k,v in features.items()}
-        logits = self.discriminator(features, c)
+        if scale == None:
+            scale = torch.ones((len(high),), device=high.device)
+        semb = get_timestep_embedding(scale.squeeze()*100, self.temb_ch)
+        semb = self.scale_proj(semb)
+
+        logits = self.discriminator(features, c, semb)
 
         return logits
 

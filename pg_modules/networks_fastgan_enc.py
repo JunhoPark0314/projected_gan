@@ -4,9 +4,10 @@
 #
 import torch.nn as nn
 from ddim.models.diffusion import get_timestep_embedding
-from pg_modules.blocks import (BlockBig, DownBlock, InitLayer, UpBlockBig, UpBlockBigCond, UpBlockSmall, UpBlockSmallCond, SEBlock, conv2d)
+from pg_modules.blocks import (AttnBlock, BlockBig, DownBlock, InitLayer, UpBlockBig, UpBlockBigCond, UpBlockSmall, UpBlockSmallCond, SEBlock, conv2d)
 import torch
 
+from pg_modules.diffaug import DiffAugment
 
 def normalize_second_moment(x, dim=1, eps=1e-8):
     return x * (x.square().mean(dim=dim, keepdim=True) + eps).rsqrt()
@@ -192,12 +193,16 @@ class Encoder(nn.Module):
         hidden_ch = hidden_ch
         for i in range(num_layer):
             self.layers.append(DownBlock(in_ch, hidden_ch))
+            if i == (num_layer - 2):
+                self.layers.append(AttnBlock(hidden_ch))
             in_ch = hidden_ch
         self.layers.append(nn.Conv2d(hidden_ch, out_ch, 1, 1))
         self.layers.append(nn.InstanceNorm2d(out_ch, affine=False))
         self.layers = nn.Sequential(*self.layers)
 
     def forward(self, x, z, c, **kwargs):
+        # x = DiffAugment(x, policy='color,cutout')
+
         enc = self.layers(x)
         scale = torch.rand((x.shape[0], 1, 1, 1), device=x.device)
         scale = kwargs.get("scale", scale)

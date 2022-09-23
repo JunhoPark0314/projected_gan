@@ -239,12 +239,12 @@ def training_loop(
         grid_size, real_images, labels = setup_snapshot_image_grid(training_set=training_set)
         real_images = np.tile(real_images[:real_images.shape[0]//4], (4,1,1,1))
         save_image_grid(real_images, os.path.join(run_dir, 'reals.png'), drange=[0,255], grid_size=grid_size)
-        real_images = torch.tensor((real_images - 127.5) / 127.5).to(device).float()
+        real_images = torch.tensor((real_images - 127.5) / 127.5).float()
 
         grid_x = real_images.split(batch_gpu)
         grid_z = torch.randn([labels.shape[0], G.z_dim], device=device).split(batch_gpu)
         grid_c = torch.from_numpy(labels).to(device).split(batch_gpu)
-        images = torch.cat([G_ema(x=x, z=z, c=c, noise_mode='const').cpu() for x, z, c in zip(grid_x, grid_z, grid_c)]).numpy()
+        images = torch.cat([G_ema(x=x.to(device), z=z, c=c, noise_mode='const').cpu() for x, z, c in zip(grid_x, grid_z, grid_c)]).numpy()
 
         save_image_grid(images, os.path.join(run_dir, 'fakes_init.png'), drange=[-1,1], grid_size=grid_size)
 
@@ -393,7 +393,7 @@ def training_loop(
             high_images = []
             low_images = []
             for i, (x, z, c) in enumerate(zip(grid_x, grid_z, grid_c)):
-                high, low, _, _ =G_ema(x=x, z=z, c=c, temp_min=i/len(grid_x), temp_max=(i+1)/len(grid_x), noise_mode='const', return_small=True)
+                high, low, _, _ =G_ema(x=x.to(device), z=z, c=c, temp_min=(i/len(grid_x))**2, temp_max=((i+1)/len(grid_x))**2, noise_mode='const', return_small=True)
                 high_images.append(high.cpu())
                 low_images.append(low.cpu())
 
