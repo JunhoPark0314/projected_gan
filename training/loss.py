@@ -152,8 +152,8 @@ class ProjectedGANPairLoss(Loss):
         loss_Dreal = 0
         loss_Dgen = 0
 
-        # warmup = max(min((cur_nimg - self.warmup_nimg) / self.warmup_nimg, 1), 0.1)
-        warmup = 1
+        warmup = max(min((cur_nimg - self.warmup_nimg) / self.warmup_nimg, 1), 0.1)
+        # warmup = 1
 
         real_img_low = torch.nn.functional.interpolate(real_img, size=(32, 32), mode='bilinear')
         real_img_high = real_img
