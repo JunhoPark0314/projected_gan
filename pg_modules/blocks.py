@@ -105,6 +105,16 @@ def UpBlockBig(in_planes, out_planes):
         )
     return block
 
+def BlockBig(in_planes, out_planes):
+    block = nn.Sequential(
+        conv2d(in_planes, out_planes*2, 3, 1, 1, bias=False),
+        NoiseInjection(),
+        NormLayer(out_planes*2), GLU(),
+        conv2d(out_planes, out_planes*2, 3, 1, 1, bias=False),
+        NoiseInjection(),
+        NormLayer(out_planes*2), GLU()
+        )
+    return block
 
 class UpBlockBigCond(nn.Module):
     def __init__(self, in_planes, out_planes, z_dim):
