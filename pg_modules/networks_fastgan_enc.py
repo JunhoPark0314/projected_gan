@@ -216,7 +216,7 @@ class Encoder(nn.Module):
         for i in range(num_layer):
             up_layers.append(UpBlockSmall(hidden_ch, hidden_ch))
         self.up_layers = nn.ModuleList(up_layers)
-        self.out = nn.Conv2d(hidden_ch, 320, 3, 3)
+        self.out = nn.Conv2d(hidden_ch, 320, 1, 1)
         nn.init.constant(self.out.weight, 0)
 
         self.out_norm = nn.InstanceNorm2d(in_ch, affine=False)
