@@ -53,7 +53,7 @@ class FastganSynthesis(nn.Module):
         self.scale_16 = nn.Sequential(*[
             nn.Linear(128, 128),
             nn.LeakyReLU(0.2, inplace=True),
-            nn.Linear(128, 1),
+            nn.Linear(128, 1 + nfc[16]),
         ])
 
         UpBlock = UpBlockSmall if lite else UpBlockBig
@@ -88,7 +88,9 @@ class FastganSynthesis(nn.Module):
             input = normalize_second_moment(input[:, 0])
             temb = get_timestep_embedding(scale.squeeze() * 1000, self.temb_ch)
             temb = self.scale_proj(temb)
-            t_scale_16 = self.scale_16(temb).sigmoid()[...,None,None]
+            t_16 = self.scale_16(temb)
+            t_scale_16 = t_16[:,:1].sigmoid()[...,None,None]
+            t_bias_16 = t_16[:,1:][...,None,None]
             t_bias = self.scale_bias(temb)
 
             feat_4 = self.init(input) 
@@ -99,7 +101,7 @@ class FastganSynthesis(nn.Module):
 
             feat_16 = self.feat_16(main_feat_8) * (1 - t_scale_16).sqrt() + h_proj * t_scale_16.sqrt()
 
-            feat_16 = self.feat_proj(feat_16)
+            feat_16 = self.feat_proj(feat_16 + t_bias_16)
             feat_32 = self.feat_32(feat_16)
 
             feat_64 = self.se_64(feat_4, self.feat_64(feat_32))
