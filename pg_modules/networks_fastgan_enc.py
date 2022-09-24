@@ -206,7 +206,7 @@ class Encoder(nn.Module):
         num_layer = 2
         down_layers = []
         for i in range(num_layer):
-            self.down_layers.append(DownBlock(in_ch, hidden_ch))
+            down_layers.append(DownBlock(in_ch, hidden_ch))
             in_ch = hidden_ch
         self.down_layers = nn.ModuleList(down_layers)
 
