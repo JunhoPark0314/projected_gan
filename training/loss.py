@@ -112,12 +112,12 @@ class ProjectedGANPairLoss(Loss):
         self.warmup_nimg = 20 * 2**12
 
     def run_G(self, real_img, z, c, temp_max=None, update_emas=False):
-        h, ws, scale = self.G.mapping(real_img, z, c, temp_max=temp_max, update_emas=update_emas)
+        h, ws, scale, enc = self.G.mapping(real_img, z, c, temp_max=temp_max, update_emas=update_emas)
         high, low, h_proj = self.G.synthesis(h, ws, c, scale, update_emas=False)
-        return high, low, scale.squeeze()[:,None], h_proj
+        return high, low, scale.squeeze()[:,None], h_proj, enc
 
     def run_D(self, x, h, c, scale, blur_sigma=0, update_emas=False):
-        logits = self.D(x, h, c, scale)
+        logits = self.D(x, h.detach(), c, scale)
         return logits
     
     def run_E(self, img1, img2, scale=None, blur_sigma=1):
@@ -145,6 +145,7 @@ class ProjectedGANPairLoss(Loss):
         loss_Gmain = 0
         loss_Dreal = 0
         loss_Dgen = 0
+        loss_rec = 0
 
         # warmup = max(min((cur_nimg - self.warmup_nimg) / self.warmup_nimg, 1), 0.1)
         warmup = 1
@@ -156,9 +157,10 @@ class ProjectedGANPairLoss(Loss):
 
             # Gmain: Maximize logits for generated images.
             with torch.autograd.profiler.record_function('Gmain_forward'):
-                gen_img_high, gen_img_low, scale, h_proj = self.run_G(real_img, gen_z, gen_c, temp_max=warmup)
+                gen_img_high, gen_img_low, scale, h_proj, enc = self.run_G(real_img, gen_z, gen_c, temp_max=warmup)
                 gen_logits = self.run_D(gen_img_high, h_proj, gen_c, scale, blur_sigma=blur_sigma)
                 loss_Gmain = (-gen_logits).mean()
+                loss_rec = (self.G.synthesis.h_proj(enc) - self.G.synthesis.h_proj(h_proj)).square().mean()
                 # gen_pair_logits = self.run_E(gen_img_low, h_proj, scale)
                 # loss_Gpair = (F.relu(torch.ones_like(gen_pair_logits) * (scale) - gen_pair_logits)).mean()
                 # loss_Gpair = (-gen_pair_logits).mean() * warmup
@@ -170,13 +172,13 @@ class ProjectedGANPairLoss(Loss):
                 training_stats.report('Loss/G/pair_loss', loss_Gpair)
 
             with torch.autograd.profiler.record_function('Gmain_backward'):
-                (loss_Gmain + loss_Gpair).backward()
+                (loss_Gmain + loss_Gpair + loss_rec).backward()
 
         if do_Dmain:
 
             # Dmain: Minimize logits for generated images.
             with torch.autograd.profiler.record_function('Dgen_forward'):
-                gen_img_high, gen_img_low, scale, h_proj = self.run_G(real_img, gen_z, gen_c, temp_max=warmup, update_emas=True)
+                gen_img_high, gen_img_low, scale, h_proj, _ = self.run_G(real_img, gen_z, gen_c, temp_max=warmup, update_emas=True)
                 gen_logits = self.run_D(gen_img_high, h_proj, gen_c, scale, blur_sigma=blur_sigma)
                 loss_Dgen = (F.relu(torch.ones_like(gen_logits) + gen_logits)).mean()
                 # gen_pair_logits = self.run_E(gen_img_low, h_proj, scale)

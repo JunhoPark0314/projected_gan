@@ -248,7 +248,7 @@ class Encoder(nn.Module):
         noise = torch.randn_like(enc, device=x.device)
         out = (enc * alpha.sqrt() + noise * (1 - alpha).sqrt())
         # out = enc
-        return out, z.unsqueeze(1), t/1000
+        return out, z.unsqueeze(1), t/1000, enc
 
 class Generator(nn.Module):
     def __init__(
@@ -276,8 +276,8 @@ class Generator(nn.Module):
         self.synthesis = Synthesis(ngf=ngf, z_dim=z_dim, nc=img_channels, img_resolution=img_resolution, **synthesis_kwargs)
 
     def forward(self, x, z, c, return_small=False, **kwargs):
-        h, w, scale = self.mapping(x, z, c, **kwargs)
+        h, w, scale, enc = self.mapping(x, z, c, **kwargs)
         high_res, low_res, h_proj = self.synthesis(h, w, c, scale)
         if return_small:
-            return high_res, low_res, scale, h_proj.detach()
+            return high_res, low_res, scale, h_proj, enc
         return high_res
