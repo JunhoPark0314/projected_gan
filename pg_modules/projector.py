@@ -108,6 +108,52 @@ class F_RandomProj(nn.Module):
         self.pretrained, self.scratch = _make_projector(im_res=im_res, cout=self.cout, proj_type=self.proj_type, expand=self.expand)
         self.CHANNELS = self.pretrained.CHANNELS
         self.RESOLUTIONS = self.pretrained.RESOLUTIONS
+    
+    def pretrain_forward(self, x):
+        out0 = self.pretrained.layer0(x)
+        out1 = self.pretrained.layer1(out0)
+        out2 = self.pretrained.layer2(out1)
+        out3 = self.pretrained.layer3(out2)
+
+        # start enumerating at the lowest layer (this is where we put the first discriminator)
+        out = {
+            '0': out0,
+            '1': out1,
+            '2': out2,
+            '3': out3,
+        }
+
+        return out
+    
+    def proj_forward(self, out):
+        out0_channel_mixed = self.scratch.layer0_ccm(out['0'])
+        out1_channel_mixed = self.scratch.layer1_ccm(out['1'])
+        out2_channel_mixed = self.scratch.layer2_ccm(out['2'])
+        out3_channel_mixed = self.scratch.layer3_ccm(out['3'])
+
+        out = {
+            '0': out0_channel_mixed,
+            '1': out1_channel_mixed,
+            '2': out2_channel_mixed,
+            '3': out3_channel_mixed,
+        }
+
+        if self.proj_type == 1: return out
+
+        # from bottom to top
+        out3_scale_mixed = self.scratch.layer3_csm(out3_channel_mixed)
+        out2_scale_mixed = self.scratch.layer2_csm(out3_scale_mixed, out2_channel_mixed)
+        out1_scale_mixed = self.scratch.layer1_csm(out2_scale_mixed, out1_channel_mixed)
+        out0_scale_mixed = self.scratch.layer0_csm(out1_scale_mixed, out0_channel_mixed)
+
+        out = {
+            '0': out0_scale_mixed,
+            '1': out1_scale_mixed,
+            '2': out2_scale_mixed,
+            '3': out3_scale_mixed,
+        }
+
+        return out
 
     def forward(self, x):
         # predict feature maps

@@ -36,7 +36,7 @@ class FastganSynthesis(nn.Module):
 
         # layers
         self.init = InitLayer(z_dim, channel=nfc[2], sz=4)
-        self.h_init = InitLayer(z_dim, channel=nfc[8], sz=4)
+        self.h_init = InitLayer(z_dim, channel=32, sz=4)
         # self.h_proj = nn.Conv2d(32, nfc[16], 1)
         # self.h_proj = nn.parameter.Parameter(torch.randn((32, nfc[8])))
         # self.h_gain = 1 / np.sqrt(32)
@@ -61,6 +61,7 @@ class FastganSynthesis(nn.Module):
         self.feat_128 = UpBlock(nfc[64], nfc[128])
         self.feat_256 = UpBlock(nfc[128], nfc[256])
 
+        self.se_init = SEBlock(32, 32)
         self.se_proj = SEBlock(nfc[16], nfc[16])
         self.se_64  = SEBlock(nfc[4], nfc[64])
         self.se_128 = SEBlock(nfc[8], nfc[128])
@@ -86,7 +87,8 @@ class FastganSynthesis(nn.Module):
             # t_bias_16 = self.scale_16(temb)
 
             feat_4 = self.init(input) 
-            h_proj = self.h_proj(h)
+            feat_hmod = self.h_init(input)
+            h_proj = self.h_proj(self.se_init(feat_hmod, h))
             h_ch_proj = self.h_ch_proj(h)
             # h_proj = self.se_proj(feat_4 * t_scale[...,None,None] + t_bias[...,None,None], h_proj)
             # feat_8 = self.feat_8(feat_4) + torch.einsum('bchw,ck->bkhw', h, self.h_proj * self.h_gain) + t_bias[...,None,None]

@@ -279,7 +279,7 @@ class ProjectedPairDiscriminator(torch.nn.Module):
         )
         self.pair_norm = nn.ModuleDict({
             str(i): nn.InstanceNorm2d(f, affine=False)
-            for i, (f, r) in enumerate(zip(self.feature_network.CHANNELS, [112, 56, 28, 14]))
+            for i, (f, r) in enumerate(zip([24, 40, 112, 320], [112, 56, 28, 14]))
         })
 
 
@@ -313,7 +313,7 @@ class ProjectedPairDiscriminator(torch.nn.Module):
 
         return logits
 
-    def pair_disc(self, x1, x2, scale=None, c=None):
+    def pair_disc(self, x1, x2, scale=None, c=None, real=False):
         # x = torch.cat([x1, x2])
         x = x1
         x = DiffAugment(x, policy='color,translation,cutout')
@@ -321,20 +321,21 @@ class ProjectedPairDiscriminator(torch.nn.Module):
         #if self.interp224:
         x = F.interpolate(x, 224, mode='bilinear', align_corners=False)
         
-        features = self.feature_network(x)
-        # features = {k: self.pair_norm[k](v) for k,v in features.items()}
+        features = self.feature_network.pretrain_forward(x)
+        features = {k: self.pair_norm[k](v) for k,v in features.items()}
+        features = self.feature_network.proj_forward(features)
+
         pair_features = {}
         semb = get_timestep_embedding(scale.squeeze() * 100, self.temb_ch)
         semb = self.scale_proj(semb)
 
         # scale = scale.reshape(-1, 1, 1, 1)
         for k, v in features.items():
-            x1_feat = self.pair_norm[k](v)
+            x1_feat = v
             x2_feat = torch.nn.functional.interpolate(x2, size=(x1_feat.shape[2], x1_feat.shape[2]), mode='bilinear')
             # x1_feat, x2_feat = torch.chunk(v, 2, 0)
             # x1_feat = x1_feat * scale.sqrt() + torch.randn_like(x1_feat) * (1 - scale).sqrt()
             # ch_proj = torch.randn((x1_feat.shape[1], x1_feat.shape[1]), device=x1_feat.device)
-            # x1_feat = torch.einsum("bchw,ck->bkhw",x1_feat, ch_proj)
             pair_features[k] = torch.cat([x1_feat, x2_feat], 1)
 
         logits = self.pair_discriminator(pair_features, c, semb)
