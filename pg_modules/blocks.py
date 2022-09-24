@@ -110,9 +110,6 @@ def BlockBig(in_planes, out_planes):
         conv2d(in_planes, in_planes*2, 3, 1, 1, bias=False),
         NormLayer(in_planes*2), GLU(),
         AttnBlock(in_planes),
-        conv2d(in_planes, in_planes*2, 3, 1, 1, bias=False),
-        NormLayer(in_planes*2), GLU(),
-        AttnBlock(in_planes),
         conv2d(in_planes, out_planes*2, 3, 1, 1, bias=False),
         NormLayer(out_planes*2), GLU(),
         )

@@ -49,7 +49,7 @@ class FastganSynthesis(nn.Module):
         self.scale_bias = nn.Sequential(*[
             nn.Linear(128, 128),
             nn.LeakyReLU(0.2, inplace=True),
-            nn.Linear(128, z_dim),
+            nn.Linear(128, nfc[8]),
         ])
         self.scale_16 = nn.Sequential(*[
             nn.Linear(128, 128),
@@ -59,7 +59,7 @@ class FastganSynthesis(nn.Module):
 
         UpBlock = UpBlockSmall if lite else UpBlockBig
 
-        self.h_proj = BlockBig(32, nfc[16])
+        self.h_proj = BlockBig(320, nfc[8])
         self.feat_proj = BlockBig(nfc[16], nfc[16])
         # self.h_ch_proj = BlockBig(32, 32)
         self.feat_8   = UpBlock(nfc[4], nfc[8])
@@ -69,7 +69,7 @@ class FastganSynthesis(nn.Module):
         self.feat_128 = UpBlock(nfc[64], nfc[128])
         self.feat_256 = UpBlock(nfc[128], nfc[256])
 
-        self.se_init = SEBlock(32, nfc[8])
+        self.se_init = SEBlock(nfc[8], nfc[8])
         self.se_64  = SEBlock(nfc[4], nfc[64])
         self.se_128 = SEBlock(nfc[8], nfc[128])
         self.se_256 = SEBlock(nfc[16], nfc[256])
@@ -89,19 +89,19 @@ class FastganSynthesis(nn.Module):
             input = normalize_second_moment(input[:, 0])
             temb = get_timestep_embedding(scale.squeeze() * 1000, self.temb_ch)
             temb = self.scale_proj(temb)
-            t_16 = self.scale_16(temb)
-            t_scale_16 = t_16[:,:1].sigmoid()[...,None,None]
+            # t_16 = self.scale_16(temb)
+            # t_scale_16 = t_16[:,:1].sigmoid()[...,None,None]
             # t_bias_16 = t_16[:,1:][...,None,None]
             t_bias = self.scale_bias(temb)
 
             feat_4 = self.init(input) 
-            feat_h_init = self.h_init(input + t_bias)
+            # feat_h_init = self.h_init(input + t_bias)
             feat_8 = self.feat_8(feat_4)
-            h_proj = self.h_proj(h)
-            main_feat_8 = self.se_init(feat_h_init, feat_8)
+            # h_proj = self.h_proj(h)
+            main_feat_8 = self.se_init(self.h_proj(h), feat_8) + t_bias[...,None,None]
             # main_feat_8 = feat_8
 
-            feat_16 = self.feat_16(main_feat_8) * (1 - t_scale_16).sqrt() + h_proj * t_scale_16.sqrt()
+            feat_16 = self.feat_16(main_feat_8) #* (1 - t_scale_16).sqrt() + h_proj * t_scale_16.sqrt()
 
             feat_16 = self.feat_proj(feat_16)
             feat_32 = self.feat_32(feat_16)
@@ -217,8 +217,8 @@ class Encoder(nn.Module):
         # self.out_norm = nn.InstanceNorm2d(out_ch, affine=False)
         # # self.layers.append(nn.InstanceNorm2d(out_ch, affine=False))
         # self.layers = nn.Sequential(*self.layers)
-        self.out = nn.Conv2d(112, 32, 1, 1)
-        self.out_norm = nn.InstanceNorm2d(112, affine=False)
+        # self.out = nn.Conv2d(320, 32, 1, 1)
+        self.out_norm = nn.InstanceNorm2d(320, affine=False)
 
         self.num_timesteps = 1000
         betas = get_beta_schedule(
@@ -235,10 +235,10 @@ class Encoder(nn.Module):
         # enc = self.out(enc.reshape(-1, 32, 16*16).permute(0, 2, 1).reshape(-1, 32)).reshape(-1, 16*16, 32).permute(0, 2, 1).reshape(-1, 32, 16, 16)
         # enc = self.out_norm(enc)
         x = torch.nn.functional.interpolate(x, 224, mode='bilinear', align_corners=False)
-        enc = self.feature_network.pretrain_forward(x)['2']
+        enc = self.feature_network.pretrain_forward(x)['3']
         enc = self.out_norm(enc)
-        enc = self.out(enc)
-        enc = torch.nn.functional.interpolate(enc, 16, mode='bilinear', align_corners=False)
+        # enc = self.out(enc)
+        enc = torch.nn.functional.interpolate(enc, 4, mode='bilinear', align_corners=False)
 
         n = len(enc)
         t = torch.randint(
