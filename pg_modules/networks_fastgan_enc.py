@@ -130,7 +130,7 @@ class FastganSynthesisCond(nn.Module):
         super().__init__()
 
         self.z_dim = z_dim
-        nfc_multi = {2: 16, 4:16, 8:8, 16:4, 32:2, 64:2, 128:1, 256:0.5,
+        nfc_multi = {2: 16, 4:16, 8:4, 16:4, 32:2, 64:2, 128:1, 256:0.5,
                      512:0.25, 1024:0.125, 2048:0.125}
         nfc = {}
         for k, v in nfc_multi.items():
