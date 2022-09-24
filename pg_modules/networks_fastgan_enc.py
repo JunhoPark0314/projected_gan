@@ -214,7 +214,7 @@ class Encoder(nn.Module):
 
         up_layers = []
         for i in range(num_layer):
-            up_layers.append(UpBlockSmall)
+            up_layers.append(UpBlockSmall(hidden_ch, hidden_ch))
         self.up_layers = nn.ModuleList(up_layers)
         self.out = nn.Conv2d(128, 320, 3, 3)
         nn.init.constant(self.out.weight, 0)
