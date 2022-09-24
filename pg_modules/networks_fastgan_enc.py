@@ -28,7 +28,7 @@ class FastganSynthesis(nn.Module):
         self.temb_ch =512
 
         # channel multiplier
-        nfc_multi = {2: 16, 4:16, 8:4, 16:2, 32:2, 64:2, 128:1, 256:0.5,
+        nfc_multi = {2: 16, 4:16, 8:8, 16:4, 32:2, 64:2, 128:1, 256:0.5,
                      512:0.25, 1024:0.125}
         nfc = {}
         for k, v in nfc_multi.items():
@@ -231,7 +231,7 @@ class Encoder(nn.Module):
         ).to(enc.device)
         t = torch.cat([t, self.num_timesteps - t - 1], dim=0)[:n]
         temp_min, temp_max = kwargs.get("temp_min", 0.0), kwargs.get("temp_max", 1.0)
-        t = (t * (temp_max - temp_min) + temp_min).floor().long()
+        t = (t * (temp_max - temp_min) + self.num_timesteps * temp_min).floor().long()
         alpha = compute_alpha(self.betas, t)
 
         noise = torch.randn_like(enc, device=x.device)
