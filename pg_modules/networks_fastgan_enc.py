@@ -202,25 +202,26 @@ class Encoder(nn.Module):
 		out_ch=32,
     ):
         super().__init__()
-        # self.out_ch = out_ch
-        # num_layer = int(np.log2(img_resolution)) - 4
-        # self.layers = []
-        # in_ch = img_channels
-        # hidden_ch = hidden_ch
+        in_ch = 320
+        num_layer = 2
+        down_layers = []
+        for i in range(num_layer):
+            self.down_layers.append(DownBlock(in_ch, hidden_ch))
+            in_ch = hidden_ch
+        self.down_layers = nn.ModuleList(down_layers)
 
-        # self.ch_layers = []
-        # for i in range(num_layer):
-        #     self.layers.append(DownBlock(in_ch, hidden_ch))
-        #     in_ch = hidden_ch
-        # self.layers.append(nn.Conv2d(hidden_ch, out_ch, 1, 1))
-        # self.out = FullyConnectedLayer(out_ch, out_ch, lr_multiplier=0.01)
-        # self.out_norm = nn.InstanceNorm2d(out_ch, affine=False)
-        # # self.layers.append(nn.InstanceNorm2d(out_ch, affine=False))
-        # self.layers = nn.Sequential(*self.layers)
-        # self.out = nn.Conv2d(320, 32, 1, 1)
-        self.out_norm = nn.InstanceNorm2d(320, affine=False)
+        self.middle_layer =AttnBlock(hidden_ch)
 
+        up_layers = []
+        for i in range(num_layer):
+            up_layers.append(UpBlockSmall)
+        self.up_layers = nn.ModuleList(up_layers)
+        self.out = nn.Conv2d(128, 320, 3, 3)
+        nn.init.constant(self.out.weight, 0)
+
+        self.out_norm = nn.InstanceNorm2d(in_ch, affine=False)
         self.num_timesteps = 1000
+
         betas = get_beta_schedule(
             beta_schedule="linear", 
             beta_start=0.0001,
@@ -253,8 +254,19 @@ class Encoder(nn.Module):
 
         noise = torch.randn_like(enc, device=x.device)
         out = (enc * alpha.sqrt() + noise * (1 - alpha).sqrt())
-        # out = enc
-        return out, z.unsqueeze(1), t/1000
+
+        h = out
+        hs = []
+        for down in self.down_layers:
+            h = down(h)
+            hs.append(h)
+        h = self.middle_layer(hs[-1])
+        for up in self.up_layers:
+            h = up(h + hs.pop())
+        assert not hs
+
+        denoised_out = (out + self.out(h) * (1 - alpha).sqrt()) / alpha.sqrt()
+        return denoised_out, enc, z.unsqueeze(1), t/1000
 
 class Generator(nn.Module):
     def __init__(
@@ -282,8 +294,8 @@ class Generator(nn.Module):
         self.synthesis = Synthesis(ngf=ngf, z_dim=z_dim, nc=img_channels, img_resolution=img_resolution, **synthesis_kwargs)
 
     def forward(self, x, z, c, return_small=False, **kwargs):
-        h, w, scale = self.mapping(x, z, c, **kwargs)
-        high_res, low_res, h_proj = self.synthesis(h, w, c, scale)
+        h, enc, w, scale = self.mapping(x, z, c, **kwargs)
+        high_res, low_res, _ = self.synthesis(h, w, c, scale)
         if return_small:
-            return high_res, low_res, scale, h_proj.detach()
+            return high_res, low_res, scale, h, enc
         return high_res
