@@ -98,7 +98,7 @@ class FastganSynthesis(nn.Module):
             # feat_h_init = self.h_init(input + t_bias)
             feat_8 = self.feat_8(feat_4)
             # h_proj = self.h_proj(h)
-            main_feat_8 = self.se_init(self.h_proj(h), feat_8) + t_bias[...,None,None]
+            main_feat_8 = self.se_init(feat_8, self.h_proj(h)) + t_bias[...,None,None]
             # main_feat_8 = feat_8
 
             feat_16 = self.feat_16(main_feat_8) #* (1 - t_scale_16).sqrt() + h_proj * t_scale_16.sqrt()
@@ -238,7 +238,7 @@ class Encoder(nn.Module):
         enc = self.feature_network.pretrain_forward(x)['3']
         enc = self.out_norm(enc)
         # enc = self.out(enc)
-        enc = torch.nn.functional.interpolate(enc, 4, mode='bilinear', align_corners=False)
+        enc = torch.nn.functional.interpolate(enc, 8, mode='bilinear', align_corners=False)
 
         n = len(enc)
         t = torch.randint(
