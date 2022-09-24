@@ -393,7 +393,7 @@ def training_loop(
             high_images = []
             low_images = []
             for i, (x, z, c) in enumerate(zip(grid_x, grid_z, grid_c)):
-                high, low, _, _ =G_ema(x=x.to(device), z=z, c=c, temp_min=(i/len(grid_x))**2, temp_max=((i+1)/len(grid_x))**2, noise_mode='const', return_small=True)
+                high, low, _, _ =G_ema(x=x.to(device), z=z, c=c, temp_min=(i/len(grid_x))**2 + 0.1, temp_max=((i+1)/len(grid_x))**2 + 0.1, noise_mode='const', return_small=True)
                 high_images.append(high.cpu())
                 low_images.append(low.cpu())
 
