@@ -159,7 +159,7 @@ class ProjectedGANPairLoss(Loss):
                 gen_img_high, gen_img_low, scale, h_proj, enc = self.run_G(real_img, gen_z, gen_c, temp_max=warmup)
                 gen_logits = self.run_D(gen_img_high, h_proj, gen_c, scale, blur_sigma=blur_sigma)
                 loss_Gmain = (-gen_logits).mean()
-                loss_rec = ((h_proj - enc).square().mean() * F.relu((-gen_logits).mean(-1)))
+                loss_rec = ((h_proj - enc).square().mean([1,2,3]) * F.relu((-gen_logits).mean(-1))).mean()
                 # gen_pair_logits = self.run_E(gen_img_low, h_proj, scale)
                 # loss_Gpair = (F.relu(torch.ones_like(gen_pair_logits) * (scale) - gen_pair_logits)).mean()
                 # loss_Gpair = (-gen_pair_logits).mean() * warmup
