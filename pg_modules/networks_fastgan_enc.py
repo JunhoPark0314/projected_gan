@@ -47,8 +47,8 @@ class FastganSynthesis(nn.Module):
             nn.Linear(512, 512),
             nn.LeakyReLU(0.2, inplace=True),
         ])
-        self.scale_8 = nn.Linear(512, nfc[16] * 2)
-        # self.scale_16 = nn.Linear(512, nfc[16])
+        self.scale_8 = nn.Linear(512, nfc[16])
+        self.scale_16 = nn.Linear(512, nfc[16] * 2)
 
         UpBlock = UpBlockSmall if lite else UpBlockBig
 
@@ -81,14 +81,14 @@ class FastganSynthesis(nn.Module):
             input = normalize_second_moment(input[:, 0])
             temb = get_timestep_embedding(scale.squeeze() * 100, self.temb_ch)
             temb = self.scale_proj(temb)
-            t_scale_8, t_bias_8 = torch.chunk(self.scale_8(temb), 2, 1)
-            t_scale_8 = t_scale_8.sigmoid()[...,None,None]
-            t_bias_8 = t_bias_8[...,None,None]
-            # t_bias_16 = self.scale_16(temb)
+            t_bias_8 = self.scale_8(temb)
+            t_scale_16, t_bias_16 = torch.chunk(self.scale_16(temb), 2, 1)
+            t_scale_16 = t_scale_16.sigmoid()[...,None,None]
+            t_bias_16 = t_bias_16[...,None,None]
 
             feat_4 = self.init(input) 
             feat_hmod = self.h_init(input)
-            h_proj = self.h_proj(self.se_init(feat_hmod, h))
+            h_proj = self.h_proj(self.se_init(feat_hmod + t_bias_8, h))
             h_ch_proj = self.h_ch_proj(h)
             # h_proj = self.se_proj(feat_4 * t_scale[...,None,None] + t_bias[...,None,None], h_proj)
             # feat_8 = self.feat_8(feat_4) + torch.einsum('bchw,ck->bkhw', h, self.h_proj * self.h_gain) + t_bias[...,None,None]
@@ -97,7 +97,7 @@ class FastganSynthesis(nn.Module):
             #main_feat_8 = feat_8 * (1 - t_scale_8).sqrt() + h_proj * t_scale_8.sqrt()
             #main_feat_8 = feat_8  + h_proj 
 
-            feat_16 = self.se_proj(h_ch_proj + t_bias_8 ,self.feat_16(feat_8)) * (1 - t_scale_8).sqrt() + h_proj * t_scale_8.sqrt()
+            feat_16 = self.se_proj(h_ch_proj + t_bias_16 ,self.feat_16(feat_8)) * (1 - t_scale_16).sqrt() + h_proj * t_scale_16.sqrt()
             feat_32 = self.feat_32(feat_16)
 
             feat_64 = self.se_64(feat_4, self.feat_64(feat_32))
