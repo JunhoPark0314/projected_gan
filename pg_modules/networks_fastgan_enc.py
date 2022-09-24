@@ -42,18 +42,16 @@ class FastganSynthesis(nn.Module):
         # self.h_gain = 1 / np.sqrt(32)
         # self.se_proj =SEBlock(nfc[4], nfc[8])
         self.scale_proj = nn.Sequential(*[
-            nn.Linear(self.temb_ch, 512),
-            nn.LeakyReLU(0.2, inplace=True),
-            nn.Linear(512, 512),
+            nn.Linear(self.temb_ch, 128),
             nn.LeakyReLU(0.2, inplace=True),
         ])
-        self.scale_8 = nn.Linear(512, 32)
-        self.scale_16 = nn.Linear(512, nfc[16] * 2)
+        self.scale_8 = nn.Linear(128, 32)
+        self.scale_16 = nn.Linear(128, 32 + nfc[16])
 
         UpBlock = UpBlockSmall if lite else UpBlockBig
 
-        self.h_proj = BlockBig(32, nfc[16])
-        self.h_ch_proj = BlockBig(32, nfc[16])
+        self.h_proj = BlockBig(32, 32)
+        # self.h_ch_proj = BlockBig(32, 32)
         self.feat_8   = UpBlock(nfc[4], nfc[8])
         self.feat_16  = UpBlock(nfc[8], nfc[16])
         self.feat_32  = UpBlock(nfc[16], nfc[32])
@@ -62,13 +60,14 @@ class FastganSynthesis(nn.Module):
         self.feat_256 = UpBlock(nfc[128], nfc[256])
 
         self.se_init = SEBlock(32, 32)
-        self.se_proj = SEBlock(nfc[16], nfc[16])
+        self.se_proj = SEBlock(32, nfc[16])
         self.se_64  = SEBlock(nfc[4], nfc[64])
         self.se_128 = SEBlock(nfc[8], nfc[128])
         self.se_256 = SEBlock(nfc[16], nfc[256])
 
         self.to_big = conv2d(nfc[img_resolution], nc, 3, 1, 1, bias=True)
         self.to_small = conv2d(nfc[32], nc, 3, 1, 1, bias=True)
+        self.to_main = conv2d(32, nfc[16], 3, 1, 1, bias=True)
 
         if img_resolution > 256:
             self.feat_512 = UpBlock(nfc[256], nfc[512])
@@ -79,25 +78,20 @@ class FastganSynthesis(nn.Module):
     def forward(self, h, input, c, scale, **kwargs):
             # map noise to hypersphere as in "Progressive Growing of GANS"
             input = normalize_second_moment(input[:, 0])
-            temb = get_timestep_embedding(scale.squeeze() * 100, self.temb_ch)
+            temb = get_timestep_embedding(scale.squeeze() * 1000, self.temb_ch)
             temb = self.scale_proj(temb)
             t_bias_8 = self.scale_8(temb)[...,None,None]
-            t_scale_16, t_bias_16 = torch.chunk(self.scale_16(temb), 2, 1)
-            t_scale_16 = t_scale_16.sigmoid()[...,None,None]
-            t_bias_16 = t_bias_16[...,None,None]
+            t_scale_bias_16 = self.scale_16(temb)
+            t_bias_16 = t_scale_bias_16[...,:32][...,None,None]
+            t_scale_16 = t_scale_bias_16[...,32:][...,None,None].sigmoid()
 
             feat_4 = self.init(input) 
+            feat_8 = self.feat_8(feat_4)
+
             feat_hmod = self.h_init(input)
             h_proj = self.h_proj(self.se_init(feat_hmod + t_bias_8, h))
-            h_ch_proj = self.h_ch_proj(h)
-            # h_proj = self.se_proj(feat_4 * t_scale[...,None,None] + t_bias[...,None,None], h_proj)
-            # feat_8 = self.feat_8(feat_4) + torch.einsum('bchw,ck->bkhw', h, self.h_proj * self.h_gain) + t_bias[...,None,None]
-            feat_8 = self.feat_8(feat_4) #+ t_bias[...,None,None]
 
-            #main_feat_8 = feat_8 * (1 - t_scale_8).sqrt() + h_proj * t_scale_8.sqrt()
-            #main_feat_8 = feat_8  + h_proj 
-
-            feat_16 = self.se_proj(h_ch_proj + t_bias_16 ,self.feat_16(feat_8)) * (1 - t_scale_16).sqrt() + h_proj * t_scale_16.sqrt()
+            feat_16 = self.se_proj(h_proj + t_bias_16 ,self.feat_16(feat_8)) * (1 - t_scale_16).sqrt() + self.to_main(h_proj) * t_scale_16.sqrt()
             feat_32 = self.feat_32(feat_16)
 
             feat_64 = self.se_64(feat_4, self.feat_64(feat_32))
@@ -191,7 +185,7 @@ class Encoder(nn.Module):
         self,
         img_resolution,
         img_channels,
-        hidden_ch = 128,
+        hidden_ch = 64,
         z_dim=256,
 		out_ch=32,
     ):
@@ -203,8 +197,6 @@ class Encoder(nn.Module):
         hidden_ch = hidden_ch
         for i in range(num_layer):
             self.layers.append(DownBlock(in_ch, hidden_ch))
-            if i == (num_layer - 2):
-                self.layers.append(AttnBlock(hidden_ch))
             in_ch = hidden_ch
         self.layers.append(nn.Conv2d(hidden_ch, out_ch, 1, 1))
         self.layers.append(nn.InstanceNorm2d(out_ch, affine=False))
@@ -216,7 +208,7 @@ class Encoder(nn.Module):
         enc = self.layers(x)
         scale = torch.rand((x.shape[0], 1, 1, 1), device=x.device)
         scale = kwargs.get("scale", scale)
-        temp_min, temp_max = kwargs.get("temp_min", 0.03), kwargs.get("temp_max", 1.0)
+        temp_min, temp_max = kwargs.get("temp_min", 0.1), kwargs.get("temp_max", 1.0)
         scale = scale.clip(min=temp_min, max=temp_max)
         noise = torch.randn_like(enc, device=x.device)
         # ch_proj = torch.randn((self.out_ch, self.out_ch), device=x.device)

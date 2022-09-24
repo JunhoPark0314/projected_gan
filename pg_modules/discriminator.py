@@ -306,7 +306,7 @@ class ProjectedPairDiscriminator(torch.nn.Module):
         #features = {k:torch.cat(torch.chunk(v, 2, 0), 1) for k,v in features.items()}
         if scale == None:
             scale = torch.ones((len(high),), device=high.device)
-        semb = get_timestep_embedding(scale.squeeze()*100, self.temb_ch)
+        semb = get_timestep_embedding(scale.squeeze()*1000, self.temb_ch)
         semb = self.scale_proj(semb)
 
         logits = self.discriminator(features, c, semb)
@@ -326,7 +326,7 @@ class ProjectedPairDiscriminator(torch.nn.Module):
         features = self.feature_network.proj_forward(features)
 
         pair_features = {}
-        semb = get_timestep_embedding(scale.squeeze() * 100, self.temb_ch)
+        semb = get_timestep_embedding(scale.squeeze() * 1000, self.temb_ch)
         semb = self.scale_proj(semb)
 
         # scale = scale.reshape(-1, 1, 1, 1)
