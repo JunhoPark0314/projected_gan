@@ -28,7 +28,7 @@ class FastganSynthesis(nn.Module):
         self.temb_ch =512
 
         # channel multiplier
-        nfc_multi = {2: 16, 4:16, 8:8, 16:4, 32:2, 64:2, 128:1, 256:0.5,
+        nfc_multi = {2: 16, 4:16, 8:8, 16:2, 32:2, 64:2, 128:1, 256:0.5,
                      512:0.25, 1024:0.125}
         nfc = {}
         for k, v in nfc_multi.items():
@@ -36,7 +36,7 @@ class FastganSynthesis(nn.Module):
 
         # layers
         self.init = InitLayer(z_dim, channel=nfc[2], sz=4)
-        self.h_init = InitLayer(z_dim, channel=32, sz=4)
+        self.h_init = InitLayer(z_dim, channel=32, sz=16)
         # self.h_proj = nn.Conv2d(32, nfc[16], 1)
         # self.h_proj = nn.parameter.Parameter(torch.randn((32, nfc[8])))
         # self.h_gain = 1 / np.sqrt(32)
@@ -45,12 +45,21 @@ class FastganSynthesis(nn.Module):
             nn.Linear(self.temb_ch, 128),
             nn.LeakyReLU(0.2, inplace=True),
         ])
-        self.scale_8 = nn.Linear(128, 32)
-        self.scale_16 = nn.Linear(128, 32 + nfc[16])
+        self.scale_bias = nn.Sequential(*[
+            nn.Linear(128, 128),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Linear(128, z_dim),
+        ])
+        self.scale_16 = nn.Sequential(*[
+            nn.Linear(128, 128),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Linear(128, 1),
+        ])
 
         UpBlock = UpBlockSmall if lite else UpBlockBig
 
-        self.h_proj = BlockBig(32, 32)
+        self.h_proj = BlockBig(32, nfc[16])
+        self.feat_proj = BlockBig(nfc[16], nfc[16])
         # self.h_ch_proj = BlockBig(32, 32)
         self.feat_8   = UpBlock(nfc[4], nfc[8])
         self.feat_16  = UpBlock(nfc[8], nfc[16])
@@ -59,15 +68,14 @@ class FastganSynthesis(nn.Module):
         self.feat_128 = UpBlock(nfc[64], nfc[128])
         self.feat_256 = UpBlock(nfc[128], nfc[256])
 
-        self.se_init = SEBlock(32, 32)
-        self.se_proj = SEBlock(32, nfc[16])
+        self.se_init = SEBlock(32, nfc[8])
         self.se_64  = SEBlock(nfc[4], nfc[64])
         self.se_128 = SEBlock(nfc[8], nfc[128])
         self.se_256 = SEBlock(nfc[16], nfc[256])
 
         self.to_big = conv2d(nfc[img_resolution], nc, 3, 1, 1, bias=True)
-        self.to_small = conv2d(nfc[32], nc, 3, 1, 1, bias=True)
-        self.to_main = conv2d(32, nfc[16], 3, 1, 1, bias=True)
+        # self.to_small = conv2d(nfc[32], nc, 3, 1, 1, bias=True)
+        # self.to_main = conv2d(32, nfc[16], 3, 1, 1, bias=True)
 
         if img_resolution > 256:
             self.feat_512 = UpBlock(nfc[256], nfc[512])
@@ -80,18 +88,18 @@ class FastganSynthesis(nn.Module):
             input = normalize_second_moment(input[:, 0])
             temb = get_timestep_embedding(scale.squeeze() * 1000, self.temb_ch)
             temb = self.scale_proj(temb)
-            t_bias_8 = self.scale_8(temb)[...,None,None]
-            t_scale_bias_16 = self.scale_16(temb)
-            t_bias_16 = t_scale_bias_16[...,:32][...,None,None]
-            t_scale_16 = t_scale_bias_16[...,32:][...,None,None].sigmoid()
+            t_scale_16 = self.scale_16(temb).sigmoid()[...,None,None]
+            t_bias = self.scale_bias(temb)
 
             feat_4 = self.init(input) 
+            feat_h_init = self.h_init(input + t_bias)
             feat_8 = self.feat_8(feat_4)
+            h_proj = self.h_proj(h)
+            main_feat_8 = self.se_init(feat_h_init + h, feat_8)
 
-            feat_hmod = self.h_init(input)
-            h_proj = self.h_proj(self.se_init(feat_hmod + t_bias_8, h))
+            feat_16 = self.feat_16(main_feat_8) * (1 - t_scale_16).sqrt() + h_proj * t_scale_16.sqrt()
 
-            feat_16 = self.se_proj(h_proj + t_bias_16 ,self.feat_16(feat_8)) * (1 - t_scale_16).sqrt() + self.to_main(h_proj) * t_scale_16.sqrt()
+            feat_16 = self.feat_proj(feat_16)
             feat_32 = self.feat_32(feat_16)
 
             feat_64 = self.se_64(feat_4, self.feat_64(feat_32))
@@ -110,7 +118,7 @@ class FastganSynthesis(nn.Module):
                 feat_last = self.feat_1024(feat_last)
 
             out = self.to_big(feat_last)
-            return out, self.to_small(feat_32), h
+            return out, None, h
 
 
 class FastganSynthesisCond(nn.Module):
@@ -195,6 +203,8 @@ class Encoder(nn.Module):
         self.layers = []
         in_ch = img_channels
         hidden_ch = hidden_ch
+
+        self.ch_layers = []
         for i in range(num_layer):
             self.layers.append(DownBlock(in_ch, hidden_ch))
             in_ch = hidden_ch
@@ -206,15 +216,17 @@ class Encoder(nn.Module):
         # x = DiffAugment(x, policy='color,cutout')
 
         enc = self.layers(x)
-        scale = torch.rand((x.shape[0], 1, 1, 1), device=x.device)
+        temp_min, temp_max = kwargs.get("temp_min", 0.0), kwargs.get("temp_max", 1.0)
+        # temp_min, temp_max = 1, 1
+        scale = torch.rand((x.shape[0], 1, 1, 1), device=x.device) * (temp_max - temp_min) + temp_min
         scale = kwargs.get("scale", scale)
-        temp_min, temp_max = kwargs.get("temp_min", 0.1), kwargs.get("temp_max", 1.0)
-        scale = scale.clip(min=temp_min, max=temp_max)
-        noise = torch.randn_like(enc, device=x.device)
+        # scale = scale.clip(min=temp_min, max=temp_max)
         # ch_proj = torch.randn((self.out_ch, self.out_ch), device=x.device)
         # enc = torch.einsum("bchw,ck->bkhw",enc, ch_proj)
 
+        noise = torch.randn_like(enc, device=x.device)
         out = (enc * scale.sqrt() + noise * (1 - scale).sqrt())
+        # out = enc
         return out, z.unsqueeze(1), scale.squeeze()
 
 class Generator(nn.Module):

@@ -195,8 +195,9 @@ def training_loop(
         z = torch.empty([batch_gpu, G.z_dim], device=device)
         c = torch.empty([batch_gpu, G.c_dim], device=device)
         img = misc.print_module_summary(G, [x, z, c])
-        low = torch.nn.AdaptiveAvgPool2d((32, 32))(img)
-        misc.print_module_summary(D, [img, low, c])
+        # low = torch.nn.AdaptiveAvgPool2d((32, 32))(img)
+        proj = torch.randn((len(img),32, 16, 16), device=img.device)
+        misc.print_module_summary(D, [img, proj, c])
 
     # Distribute across GPUs.
     if rank == 0:
@@ -241,9 +242,9 @@ def training_loop(
         save_image_grid(real_images, os.path.join(run_dir, 'reals.png'), drange=[0,255], grid_size=grid_size)
         real_images = torch.tensor((real_images - 127.5) / 127.5).float()
 
-        grid_x = real_images.split(batch_gpu)
-        grid_z = torch.randn([labels.shape[0], G.z_dim], device=device).split(batch_gpu)
-        grid_c = torch.from_numpy(labels).to(device).split(batch_gpu)
+        grid_x = real_images.split(16)
+        grid_z = torch.randn([labels.shape[0], G.z_dim], device=device).split(16)
+        grid_c = torch.from_numpy(labels).to(device).split(16)
         images = torch.cat([G_ema(x=x.to(device), z=z, c=c, noise_mode='const').cpu() for x, z, c in zip(grid_x, grid_z, grid_c)]).numpy()
 
         save_image_grid(images, os.path.join(run_dir, 'fakes_init.png'), drange=[-1,1], grid_size=grid_size)
@@ -391,16 +392,16 @@ def training_loop(
         # Save image snapshot.
         if (rank == 0) and (image_snapshot_ticks is not None) and (done or cur_tick % image_snapshot_ticks == 0):
             high_images = []
-            low_images = []
+            # low_images = []
             for i, (x, z, c) in enumerate(zip(grid_x, grid_z, grid_c)):
-                high, low, _, _ =G_ema(x=x.to(device), z=z, c=c, temp_min=(i/len(grid_x))**2 + 0.1, temp_max=((i+1)/len(grid_x))**2 + 0.1, noise_mode='const', return_small=True)
+                high, low, _, _ =G_ema(x=x.to(device), z=z, c=c, temp_min=i/len(grid_x), temp_max=(i+1)/len(grid_x), noise_mode='const', return_small=True)
                 high_images.append(high.cpu())
-                low_images.append(low.cpu())
+                # low_images.append(low.cpu())
 
             images = torch.cat(high_images).numpy()
-            small_images = torch.cat(low_images).numpy()
+            # small_images = torch.cat(low_images).numpy()
             save_image_grid(images, os.path.join(run_dir, f'fakes{cur_nimg//1000:06d}.png'), drange=[-1,1], grid_size=grid_size)
-            save_image_grid(small_images, os.path.join(run_dir, f'fakes{cur_nimg//1000:06d}_small.png'), drange=[-1,1], grid_size=grid_size)
+            # save_image_grid(small_images, os.path.join(run_dir, f'fakes{cur_nimg//1000:06d}_small.png'), drange=[-1,1], grid_size=grid_size)
 
         # Save network snapshot.
         snapshot_pkl = None

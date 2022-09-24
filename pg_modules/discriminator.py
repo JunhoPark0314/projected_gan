@@ -292,28 +292,28 @@ class ProjectedPairDiscriminator(torch.nn.Module):
     def eval(self):
         return self.train(False)
 
-    def forward(self, high, low, c, scale=None):
-        #high, low = DiffAugment_pair(high, low, policy='color,translation,cutout')
-        high = DiffAugment(high, policy='color,translation,cutout')
+    # def forward(self, high, low, c, scale=None):
+    #     #high, low = DiffAugment_pair(high, low, policy='color,translation,cutout')
+    #     high = DiffAugment(high, policy='color,translation,cutout')
 
-        # interp = max(224, high.shape[2])
-        high = F.interpolate(high, 224, mode='bilinear', align_corners=False)
-        #low = F.interpolate(low, interp, mode='bilinear', align_corners=False)
+    #     # interp = max(224, high.shape[2])
+    #     high = F.interpolate(high, 224, mode='bilinear', align_corners=False)
+    #     #low = F.interpolate(low, interp, mode='bilinear', align_corners=False)
 
-        #x = torch.cat([high, low])
-        x = high
-        features = self.feature_network(x)
-        #features = {k:torch.cat(torch.chunk(v, 2, 0), 1) for k,v in features.items()}
-        if scale == None:
-            scale = torch.ones((len(high),), device=high.device)
-        semb = get_timestep_embedding(scale.squeeze()*1000, self.temb_ch)
-        semb = self.scale_proj(semb)
+    #     #x = torch.cat([high, low])
+    #     x = high
+    #     features = self.feature_network(x)
+    #     #features = {k:torch.cat(torch.chunk(v, 2, 0), 1) for k,v in features.items()}
+    #     if scale == None:
+    #         scale = torch.ones((len(high),), device=high.device)
+    #     semb = get_timestep_embedding(scale.squeeze()*1000, self.temb_ch)
+    #     semb = self.scale_proj(semb)
 
-        logits = self.discriminator(features, c, semb)
+    #     logits = self.discriminator(features, c, semb)
 
-        return logits
+    #     return logits
 
-    def pair_disc(self, x1, x2, scale=None, c=None, real=False):
+    def forward(self, x1, x2, c=None, scale=None):
         # x = torch.cat([x1, x2])
         x = x1
         x = DiffAugment(x, policy='color,translation,cutout')
@@ -322,15 +322,17 @@ class ProjectedPairDiscriminator(torch.nn.Module):
         x = F.interpolate(x, 224, mode='bilinear', align_corners=False)
         
         features = self.feature_network.pretrain_forward(x)
-        shuffle_idx = torch.randperm(len(x), device=x.device)
-        inst_mean = {k: v.mean([2,3], keepdims=True) for k,v in features.items()}
-        inst_var = {k: (v - v.mean([2,3], keepdims=True)).square().mean([2,3], keepdims=True) + 1e-6 for k,v in features.items()}
-        mix_rate = torch.rand((len(x), 1, 1, 1), device=x.device)
-        new_mean = {k: inst_mean[k] * mix_rate + inst_mean[k][shuffle_idx] * (1 - mix_rate) for k in inst_mean.keys()}
-        new_var = {k: inst_var[k] * mix_rate + inst_var[k][shuffle_idx] * (1 - mix_rate) for k in inst_mean.keys()}
+        # shuffle_idx = torch.randperm(len(x), device=x.device)
+        # inst_mean = {k: v.mean([2,3], keepdims=True) for k,v in features.items()}
+        # inst_var = {k: (v - v.mean([2,3], keepdims=True)).square().mean([2,3], keepdims=True) + 1e-6 for k,v in features.items()}
+        # mix_rate = torch.rand((len(x), 1, 1, 1), device=x.device) * scale.reshape(-1, 1, 1, 1)
+        # new_mean = {k: inst_mean[k] * mix_rate + inst_mean[k][shuffle_idx] * (1 - mix_rate) for k in inst_mean.keys()}
+        # new_var = {k: inst_var[k] * mix_rate + inst_var[k][shuffle_idx] * (1 - mix_rate) for k in inst_mean.keys()}
 
-        features = {k: (self.pair_norm[k](v) + new_mean[k]) * new_var[k].sqrt()  for k,v in features.items()}
+        # features = {k: (self.pair_norm[k](v) + new_mean[k]) * new_var[k].sqrt()  for k,v in features.items()}
         features = self.feature_network.proj_forward(features)
+        if scale == None:
+            scale = torch.ones((len(x), 1, 1, 1), device=x.device)
 
         pair_features = {}
         semb = get_timestep_embedding(scale.squeeze() * 1000, self.temb_ch)
