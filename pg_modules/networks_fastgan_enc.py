@@ -3,6 +3,7 @@
 # modified by Axel Sauer for "Projected GANs Converge Faster"
 #
 import torch.nn as nn
+from ddim.models.diffusion import FullyConnectedLayer
 from torch_utils.misc import compute_alpha, get_timestep_embedding, get_beta_schedule
 from pg_modules.blocks import (AttnBlock, BlockBig, DownBlock, InitLayer, UpBlockBig, UpBlockBigCond, UpBlockSmall, UpBlockSmallCond, SEBlock, conv2d)
 import torch
@@ -97,7 +98,8 @@ class FastganSynthesis(nn.Module):
             feat_h_init = self.h_init(input + t_bias)
             feat_8 = self.feat_8(feat_4)
             h_proj = self.h_proj(h)
-            main_feat_8 = self.se_init(feat_h_init + h, feat_8)
+            main_feat_8 = self.se_init(feat_h_init, feat_8)
+            # main_feat_8 = feat_8
 
             feat_16 = self.feat_16(main_feat_8) * (1 - t_scale_16).sqrt() + h_proj * t_scale_16.sqrt()
 
@@ -200,19 +202,24 @@ class Encoder(nn.Module):
 		out_ch=32,
     ):
         super().__init__()
-        self.out_ch = out_ch
-        num_layer = int(np.log2(img_resolution)) - 4
-        self.layers = []
-        in_ch = img_channels
-        hidden_ch = hidden_ch
+        # self.out_ch = out_ch
+        # num_layer = int(np.log2(img_resolution)) - 4
+        # self.layers = []
+        # in_ch = img_channels
+        # hidden_ch = hidden_ch
 
-        self.ch_layers = []
-        for i in range(num_layer):
-            self.layers.append(DownBlock(in_ch, hidden_ch))
-            in_ch = hidden_ch
-        self.layers.append(nn.Conv2d(hidden_ch, out_ch, 1, 1))
-        self.layers.append(nn.InstanceNorm2d(out_ch, affine=False))
-        self.layers = nn.Sequential(*self.layers)
+        # self.ch_layers = []
+        # for i in range(num_layer):
+        #     self.layers.append(DownBlock(in_ch, hidden_ch))
+        #     in_ch = hidden_ch
+        # self.layers.append(nn.Conv2d(hidden_ch, out_ch, 1, 1))
+        # self.out = FullyConnectedLayer(out_ch, out_ch, lr_multiplier=0.01)
+        # self.out_norm = nn.InstanceNorm2d(out_ch, affine=False)
+        # # self.layers.append(nn.InstanceNorm2d(out_ch, affine=False))
+        # self.layers = nn.Sequential(*self.layers)
+        self.out = nn.Conv2d(112, 32, 1, 1)
+        self.out_norm = nn.InstanceNorm2d(112, affine=False)
+
         self.num_timesteps = 1000
         betas = get_beta_schedule(
             beta_schedule="linear", 
@@ -224,13 +231,23 @@ class Encoder(nn.Module):
     def forward(self, x, z, c, **kwargs):
         # x = DiffAugment(x, policy='color,cutout')
 
-        enc = self.layers(x)
+        # enc = self.layers(x)
+        # enc = self.out(enc.reshape(-1, 32, 16*16).permute(0, 2, 1).reshape(-1, 32)).reshape(-1, 16*16, 32).permute(0, 2, 1).reshape(-1, 32, 16, 16)
+        # enc = self.out_norm(enc)
+        x = torch.nn.functional.interpolate(x, 224, mode='bilinear', align_corners=False)
+        enc = self.feature_network.pretrain_forward(x)['2']
+        enc = self.out_norm(enc)
+        enc = self.out(enc)
+        enc = torch.nn.functional.interpolate(enc, 16, mode='bilinear', align_corners=False)
+
         n = len(enc)
         t = torch.randint(
             low=0, high=self.num_timesteps, size=(n // 2 + 1,)
         ).to(enc.device)
         t = torch.cat([t, self.num_timesteps - t - 1], dim=0)[:n]
         temp_min, temp_max = kwargs.get("temp_min", 0.0), kwargs.get("temp_max", 1.0)
+        # temp_max = min(temp_max, 0.5)
+        # temp_min = min(temp_min, temp_max)
         t = (t * (temp_max - temp_min) + self.num_timesteps * temp_min).floor().long()
         alpha = compute_alpha(self.betas, t)
 

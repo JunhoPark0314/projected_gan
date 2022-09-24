@@ -165,6 +165,7 @@ def training_loop(
     common_kwargs = dict(c_dim=training_set.label_dim, img_resolution=training_set.resolution, img_channels=training_set.num_channels)
     G = dnnlib.util.construct_class_by_name(**G_kwargs, **common_kwargs).train().requires_grad_(False).to(device) # subclass of torch.nn.Module
     D = dnnlib.util.construct_class_by_name(**D_kwargs, **common_kwargs).train().requires_grad_(False).to(device) # subclass of torch.nn.Module
+    G.mapping.feature_network = D.feature_network
     G_ema = copy.deepcopy(G).eval()
 
     # Check for existing checkpoint
@@ -309,6 +310,8 @@ def training_loop(
 
             if phase.name in ['Dmain', 'Dboth', 'Dreg']:
                 phase.module.feature_network.requires_grad_(False)
+            if phase.name in ['Gmain', 'Gboth', 'Greg']:
+                phase.module.mapping.requires_grad_(False)
 
             for real_img, real_c, gen_z, gen_c in zip(phase_real_img, phase_real_c, phase_gen_z, phase_gen_c):
                 loss.accumulate_gradients(phase=phase.name, real_img=real_img, real_c=real_c, gen_z=gen_z, gen_c=gen_c, gain=phase.interval, cur_nimg=cur_nimg)
