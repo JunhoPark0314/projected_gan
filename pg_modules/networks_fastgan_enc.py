@@ -29,7 +29,7 @@ class FastganSynthesis(nn.Module):
         self.temb_ch =512
 
         # channel multiplier
-        nfc_multi = {2: 16, 4:16, 8:8, 16:4, 32:2, 64:2, 128:1, 256:0.5,
+        nfc_multi = {2: 16, 4:8, 8:4, 16:4, 32:2, 64:2, 128:1, 256:0.5,
                      512:0.25, 1024:0.125}
         nfc = {}
         for k, v in nfc_multi.items():
@@ -199,25 +199,20 @@ class Encoder(nn.Module):
         img_channels,
         hidden_ch = 64,
         z_dim=256,
-		out_ch=32,
+		out_ch=320,
     ):
         super().__init__()
         # self.out_ch = out_ch
-        # num_layer = int(np.log2(img_resolution)) - 4
-        # self.layers = []
+        num_layer = int(np.log2(img_resolution)) - 3
+        self.layers = []
         # in_ch = img_channels
         # hidden_ch = hidden_ch
 
-        # self.ch_layers = []
-        # for i in range(num_layer):
-        #     self.layers.append(DownBlock(in_ch, hidden_ch))
-        #     in_ch = hidden_ch
-        # self.layers.append(nn.Conv2d(hidden_ch, out_ch, 1, 1))
-        # self.out = FullyConnectedLayer(out_ch, out_ch, lr_multiplier=0.01)
-        # self.out_norm = nn.InstanceNorm2d(out_ch, affine=False)
-        # # self.layers.append(nn.InstanceNorm2d(out_ch, affine=False))
-        # self.layers = nn.Sequential(*self.layers)
-        # self.out = nn.Conv2d(320, 32, 1, 1)
+        for i in range(num_layer):
+            self.layers.append(DownBlock(in_ch, hidden_ch))
+            in_ch = hidden_ch
+        self.layers.append(nn.Conv2d(hidden_ch, out_ch, 1, 1))
+        self.layers = nn.Sequential(*self.layers)
         self.out_norm = nn.InstanceNorm2d(320, affine=False)
 
         self.num_timesteps = 1000
@@ -234,11 +229,10 @@ class Encoder(nn.Module):
         # enc = self.layers(x)
         # enc = self.out(enc.reshape(-1, 32, 16*16).permute(0, 2, 1).reshape(-1, 32)).reshape(-1, 16*16, 32).permute(0, 2, 1).reshape(-1, 32, 16, 16)
         # enc = self.out_norm(enc)
-        x = torch.nn.functional.interpolate(x, 224, mode='bilinear', align_corners=False)
-        enc = self.feature_network.pretrain_forward(x)['3']
+        enc = self.layers(x)
         enc = self.out_norm(enc)
         # enc = self.out(enc)
-        enc = torch.nn.functional.interpolate(enc, 8, mode='bilinear', align_corners=False)
+        # enc = torch.nn.functional.interpolate(enc, 8, mode='bilinear', align_corners=False)
 
         n = len(enc)
         t = torch.randint(
