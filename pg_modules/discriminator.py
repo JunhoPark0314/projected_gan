@@ -314,22 +314,11 @@ class ProjectedPairDiscriminator(torch.nn.Module):
     #     return logits
 
     def forward(self, x1, x2, c=None, scale=None):
-        # x = torch.cat([x1, x2])
         x = x1
         x = DiffAugment(x, policy='color,translation,cutout')
-
-        #if self.interp224:
         x = F.interpolate(x, 224, mode='bilinear', align_corners=False)
         
         features = self.feature_network.pretrain_forward(x)
-        # shuffle_idx = torch.randperm(len(x), device=x.device)
-        # inst_mean = {k: v.mean([2,3], keepdims=True) for k,v in features.items()}
-        # inst_var = {k: (v - v.mean([2,3], keepdims=True)).square().mean([2,3], keepdims=True) + 1e-6 for k,v in features.items()}
-        # mix_rate = torch.rand((len(x), 1, 1, 1), device=x.device) * scale.reshape(-1, 1, 1, 1)
-        # new_mean = {k: inst_mean[k] * mix_rate + inst_mean[k][shuffle_idx] * (1 - mix_rate) for k in inst_mean.keys()}
-        # new_var = {k: inst_var[k] * mix_rate + inst_var[k][shuffle_idx] * (1 - mix_rate) for k in inst_mean.keys()}
-
-        # features = {k: (self.pair_norm[k](v) + new_mean[k]) * new_var[k].sqrt()  for k,v in features.items()}
         features = self.feature_network.proj_forward(features)
         if scale == None:
             scale = torch.ones((len(x), 1, 1, 1), device=x.device)
@@ -338,13 +327,9 @@ class ProjectedPairDiscriminator(torch.nn.Module):
         semb = get_timestep_embedding(scale.squeeze() * 1000, self.temb_ch)
         semb = self.scale_proj(semb)
 
-        # scale = scale.reshape(-1, 1, 1, 1)
         for k, v in features.items():
             x1_feat = v
             x2_feat = torch.nn.functional.interpolate(x2, size=(x1_feat.shape[2], x1_feat.shape[2]), mode='bilinear')
-            # x1_feat, x2_feat = torch.chunk(v, 2, 0)
-            # x1_feat = x1_feat * scale.sqrt() + torch.randn_like(x1_feat) * (1 - scale).sqrt()
-            # ch_proj = torch.randn((x1_feat.shape[1], x1_feat.shape[1]), device=x1_feat.device)
             pair_features[k] = torch.cat([x1_feat, x2_feat], 1)
 
         logits = self.pair_discriminator(pair_features, c, semb)

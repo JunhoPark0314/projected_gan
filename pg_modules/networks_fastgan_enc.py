@@ -3,7 +3,7 @@
 # modified by Axel Sauer for "Projected GANs Converge Faster"
 #
 import torch.nn as nn
-from ddim.models.diffusion import get_timestep_embedding
+from torch_utils.misc import compute_alpha, get_timestep_embedding, get_beta_schedule
 from pg_modules.blocks import (AttnBlock, BlockBig, DownBlock, InitLayer, UpBlockBig, UpBlockBigCond, UpBlockSmall, UpBlockSmallCond, SEBlock, conv2d)
 import torch
 
@@ -28,7 +28,7 @@ class FastganSynthesis(nn.Module):
         self.temb_ch =512
 
         # channel multiplier
-        nfc_multi = {2: 16, 4:16, 8:8, 16:2, 32:2, 64:2, 128:1, 256:0.5,
+        nfc_multi = {2: 16, 4:16, 8:4, 16:2, 32:2, 64:2, 128:1, 256:0.5,
                      512:0.25, 1024:0.125}
         nfc = {}
         for k, v in nfc_multi.items():
@@ -53,7 +53,7 @@ class FastganSynthesis(nn.Module):
         self.scale_16 = nn.Sequential(*[
             nn.Linear(128, 128),
             nn.LeakyReLU(0.2, inplace=True),
-            nn.Linear(128, 1 + nfc[16]),
+            nn.Linear(128, 1),
         ])
 
         UpBlock = UpBlockSmall if lite else UpBlockBig
@@ -90,7 +90,7 @@ class FastganSynthesis(nn.Module):
             temb = self.scale_proj(temb)
             t_16 = self.scale_16(temb)
             t_scale_16 = t_16[:,:1].sigmoid()[...,None,None]
-            t_bias_16 = t_16[:,1:][...,None,None]
+            # t_bias_16 = t_16[:,1:][...,None,None]
             t_bias = self.scale_bias(temb)
 
             feat_4 = self.init(input) 
@@ -101,7 +101,7 @@ class FastganSynthesis(nn.Module):
 
             feat_16 = self.feat_16(main_feat_8) * (1 - t_scale_16).sqrt() + h_proj * t_scale_16.sqrt()
 
-            feat_16 = self.feat_proj(feat_16 + t_bias_16)
+            feat_16 = self.feat_proj(feat_16)
             feat_32 = self.feat_32(feat_16)
 
             feat_64 = self.se_64(feat_4, self.feat_64(feat_32))
@@ -213,23 +213,31 @@ class Encoder(nn.Module):
         self.layers.append(nn.Conv2d(hidden_ch, out_ch, 1, 1))
         self.layers.append(nn.InstanceNorm2d(out_ch, affine=False))
         self.layers = nn.Sequential(*self.layers)
+        self.num_timesteps = 1000
+        betas = get_beta_schedule(
+            beta_schedule="linear", 
+            beta_start=0.0001,
+            beta_end=0.02,
+            num_diffusion_timesteps=1000)
+        self.register_buffer("betas", torch.tensor(betas).float())
 
     def forward(self, x, z, c, **kwargs):
         # x = DiffAugment(x, policy='color,cutout')
 
         enc = self.layers(x)
+        n = len(enc)
+        t = torch.randint(
+            low=0, high=self.num_timesteps, size=(n // 2 + 1,)
+        ).to(enc.device)
+        t = torch.cat([t, self.num_timesteps - t - 1], dim=0)[:n]
         temp_min, temp_max = kwargs.get("temp_min", 0.0), kwargs.get("temp_max", 1.0)
-        # temp_min, temp_max = 1, 1
-        scale = torch.rand((x.shape[0], 1, 1, 1), device=x.device) * (temp_max - temp_min) + temp_min
-        scale = kwargs.get("scale", scale)
-        # scale = scale.clip(min=temp_min, max=temp_max)
-        # ch_proj = torch.randn((self.out_ch, self.out_ch), device=x.device)
-        # enc = torch.einsum("bchw,ck->bkhw",enc, ch_proj)
+        t = (t * (temp_max - temp_min) + temp_min).floor().long()
+        alpha = compute_alpha(self.betas, t)
 
         noise = torch.randn_like(enc, device=x.device)
-        out = (enc * scale.sqrt() + noise * (1 - scale).sqrt())
+        out = (enc * alpha.sqrt() + noise * (1 - alpha).sqrt())
         # out = enc
-        return out, z.unsqueeze(1), scale.squeeze()
+        return out, z.unsqueeze(1), t/1000
 
 class Generator(nn.Module):
     def __init__(
