@@ -205,7 +205,7 @@ class Encoder(nn.Module):
         # self.out_ch = out_ch
         num_layer = int(np.log2(img_resolution)) - 3
         self.layers = []
-        # in_ch = img_channels
+        in_ch = img_channels
         # hidden_ch = hidden_ch
 
         for i in range(num_layer):
@@ -213,7 +213,7 @@ class Encoder(nn.Module):
             in_ch = hidden_ch
         self.layers.append(nn.Conv2d(hidden_ch, out_ch, 1, 1))
         self.layers = nn.Sequential(*self.layers)
-        self.out_norm = nn.InstanceNorm2d(320, affine=False)
+        self.out_norm = nn.InstanceNorm2d(out_ch, affine=False)
 
         self.num_timesteps = 1000
         betas = get_beta_schedule(
