@@ -102,7 +102,7 @@ class FastganSynthesis(nn.Module):
             t_bias = self.scale_bias(temb)[...,None,None]
             t_bias_4 = self.scale_bias_4(temb)[...,None,None]
 
-            h_8 = self.h_down_8(h)
+            h_8 = self.h_down_8(h.detach())
             h_4 = self.h_down_4(h_8)
 
             feat_4 = self.init(input) 
@@ -110,9 +110,9 @@ class FastganSynthesis(nn.Module):
 
             h_4 = self.h_up_4(self.se_h4(feat_4, h_4 + t_bias_4))
             h_8 = self.h_up_8(self.se_h8(feat_8, h_8 + h_4))
-            denoised_h = (h + h_8)
+            denoised_h = (h.detach() + h_8)
 
-            feat_16 = self.se_init(denoised_h.detach(), self.feat_16(feat_8)) + self.h_proj(denoised_h.detach())
+            feat_16 = self.se_init(h + h_8.detach(), self.feat_16(feat_8)) + self.h_proj(h + h_8.detach())
 
             # feat_16 = self.feat_proj(feat_16)
             feat_32 = self.feat_32(feat_16)
