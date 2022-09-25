@@ -62,8 +62,8 @@ class FastganSynthesis(nn.Module):
 
         self.h_down_8 = DownBlock(self.out_ch, nfc[16])
         self.h_down_4 = DownBlock(nfc[16], nfc[8])
-        self.h_up_4 = UpBlock(nfc[4], nfc[16])
-        self.h_up_8 = UpBlock(nfc[8], self.out_ch)
+        self.h_up_4 = UpBlock(nfc[8], nfc[16])
+        self.h_up_8 = UpBlock(nfc[16], self.out_ch)
 
         # self.feat_proj = BlockBig(nfc[16], nfc[16])
         self.h_proj = BlockBig(self.out_ch, nfc[16])
@@ -75,8 +75,8 @@ class FastganSynthesis(nn.Module):
         self.feat_256 = UpBlock(nfc[128], nfc[256])
 
         self.se_init = SEBlock(self.out_ch, nfc[16])
-        self.se_h4 = SEBlock(nfc[8], nfc[4])
-        self.se_h8 = SEBlock(nfc[16], nfc[8])
+        self.se_h4 = SEBlock(nfc[4], nfc[8])
+        self.se_h8 = SEBlock(nfc[8], nfc[16])
 
         self.se_64  = SEBlock(nfc[4], nfc[64])
         self.se_128 = SEBlock(nfc[8], nfc[128])
@@ -108,8 +108,11 @@ class FastganSynthesis(nn.Module):
             feat_4 = self.init(input) 
             feat_8 = self.feat_8(feat_4)
 
-            h_4 = self.h_up_4(self.se_h4(h_4 + t_bias_4, feat_4))
-            feat_16 = self.feat_16(self.se_h8(h_8 + h_4, feat_8)) + self.h_proj(h + t_bias)
+            h_4 = self.h_up_4(self.se_h4(feat_4, h_4 + t_bias_4))
+            h_8 = self.h_up_8(self.se_h8(feat_8, h_8 + h_4))
+            denoised_h = (h + h_8)
+
+            feat_16 = self.se_init(denoised_h, self.feat_16(feat_8)) + self.h_proj(denoised_h)
 
             # feat_16 = self.feat_proj(feat_16)
             feat_32 = self.feat_32(feat_16)
@@ -130,7 +133,7 @@ class FastganSynthesis(nn.Module):
                 feat_last = self.feat_1024(feat_last)
 
             out = self.to_big(feat_last)
-            return out, None, h
+            return out, None, denoised_h
 
 
 class FastganSynthesisCond(nn.Module):
@@ -249,9 +252,9 @@ class Encoder(nn.Module):
             low=0, high=self.num_timesteps, size=(n // 2 + 1,)
         ).to(enc.device)
         t = torch.cat([t, self.num_timesteps - t - 1], dim=0)[:n]
-        temp_min, temp_max = kwargs.get("temp_min", 0.0), kwargs.get("temp_max", 0.75)
-        temp_max = min(temp_max, 0.75)
-        temp_min = min(temp_min, temp_max)
+        temp_min, temp_max = kwargs.get("temp_min", 0.0), kwargs.get("temp_max", 1.0)
+        # temp_max = min(temp_max, 0.5)
+        # temp_min = min(temp_min, temp_max)
         t = (t * (temp_max - temp_min) + self.num_timesteps * temp_min).floor().long()
         alpha = compute_alpha(self.betas, t)
 
@@ -287,7 +290,7 @@ class Generator(nn.Module):
 
     def forward(self, x, z, c, return_small=False, **kwargs):
         h, w, scale, enc = self.mapping(x, z, c, **kwargs)
-        high_res, low_res, h_proj = self.synthesis(h, w, c, scale)
+        high_res, low_res, denoised_h = self.synthesis(h, w, c, scale)
         if return_small:
-            return high_res, low_res, scale, h_proj, enc
+            return high_res, low_res, scale, denoised_h, enc
         return high_res
