@@ -280,14 +280,14 @@ class ProjectedPairDiscriminator(torch.nn.Module):
             channels=[f + 32 for f in self.feature_network.CHANNELS],
             # channels=self.feature_network.CHANNELS,
             resolutions=self.feature_network.RESOLUTIONS,
-            # scond=1,
+            scond=1,
             **backbone_kwargs,
         )
         # self.proj = nn.Conv2d(320, 32, 1, 1)
-        self.pair_norm = nn.ModuleDict({
-            str(i): nn.InstanceNorm2d(f, affine=False)
-            for i, (f, r) in enumerate(zip([24, 40, 112, 320], [112, 56, 28, 14]))
-        })
+        # self.pair_norm = nn.ModuleDict({
+        #     str(i): nn.InstanceNorm2d(f, affine=False)
+        #     for i, (f, r) in enumerate(zip([24, 40, 112, 320], [112, 56, 28, 14]))
+        # })
 
 
     def train(self, mode=True):
@@ -327,24 +327,21 @@ class ProjectedPairDiscriminator(torch.nn.Module):
         x = F.interpolate(x, 224, mode='bilinear', align_corners=False)
         
         features = self.feature_network.pretrain_forward(x)
-        features = {k: self.pair_norm[k](v) for k,v in features.items()}
-        naive_features = self.feature_network.proj_forward(features)
-        logits = self.discriminator(naive_features, c)
+        features = self.feature_network.proj_forward(features)
+        if scale == None:
+            scale = torch.ones((len(x), 1, 1, 1), device=x.device)
+
+        pair_features = {}
+        semb = get_timestep_embedding(scale.squeeze() * 1000, self.temb_ch)
+        semb = self.scale_proj(semb)
+
+        # x2 = self.proj(x2)
+
+        for k, v in features.items():
+            x1_feat = v
+            x2_feat = torch.nn.functional.interpolate(x2, size=(x1_feat.shape[2], x1_feat.shape[2]), mode='bilinear')
+            pair_features[k] = torch.cat([x1_feat, x2_feat], 1)
+
+        logits = self.pair_discriminator(pair_features, c, semb)
+
         return logits
-
-        # if pid != None:
-        #     scale = scale.reshape(-1, 1, 1, 1)
-        #     mean = {k: v.mean([2,3], keepdims=True) for k, v in features.items()}
-        #     var = {k: (v - mean[k]).square().mean([2,3], keepdims=True) + 1e-4 for k, v in features.items()}
-        #     new_mean = {k: v*scale + v[pid]*(1-scale) for k, v in mean.items()}
-        #     new_var = {k: v*scale + v[pid]*(1-scale) for k, v in var.items()}
-        #     features = {k: ((v - mean[k]) / var[k].sqrt() * new_var[k].sqrt() + new_mean[k]) for k,v in features.items()}
-
-        # features = self.feature_network.proj_forward(features)
-        # pair_features = {}
-        # for k, v in features.items():
-        #     pair_features[k] = torch.cat([v, nn.functional.interpolate(x2, size=v.shape[2:])], 1)
-
-        # pair_logits = self.pair_discriminator(pair_features, c)
-
-        # return torch.cat([logits, pair_logits], -1)

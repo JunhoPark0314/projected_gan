@@ -54,6 +54,11 @@ class FastganSynthesis(nn.Module):
 
         UpBlock = UpBlockSmall if lite else UpBlockBig
 
+        self.h_down_8 = DownBlock(32, 32)
+        self.h_down_4 = DownBlock(32, 32)
+        self.h_up_4 = UpBlock(32, 32)
+        self.h_up_8 = UpBlock(32, 32)
+
         # self.feat_proj = BlockBig(nfc[16], nfc[16])
         self.h_proj = BlockBig(32, nfc[16])
         self.feat_8   = UpBlock(nfc[4], nfc[8])
@@ -64,6 +69,10 @@ class FastganSynthesis(nn.Module):
         self.feat_256 = UpBlock(nfc[128], nfc[256])
 
         self.se_init = SEBlock(32, nfc[16])
+        self.se_h4 = SEBlock(nfc[4], 32)
+        self.se_h8 = SEBlock(nfc[8], 32)
+        self.se_h16 = SEBlock(32, nfc[16])
+
         self.se_64  = SEBlock(nfc[4], nfc[64])
         self.se_128 = SEBlock(nfc[8], nfc[128])
         self.se_256 = SEBlock(nfc[16], nfc[256])
@@ -87,10 +96,16 @@ class FastganSynthesis(nn.Module):
             temb = self.scale_proj(temb)
             t_bias = self.scale_bias(temb)[...,None,None]
 
+            h_8 = self.h_down_8(h)
+            h_4 = self.h_down_4(h_8)
+
             feat_4 = self.init(input) 
-            # feat_4 = self.h_init(h)
             feat_8 = self.feat_8(feat_4)
-            feat_16 = self.se_init(h+t_bias, self.feat_16(feat_8)) + self.h_proj(h)
+
+            h_4 = self.h_up_4(self.se_h4(feat_4, h_4))
+            h_8 = self.h_up_8(self.se_h8(feat_8, h_8 + h_4))
+
+            feat_16 = self.se_init(h+t_bias, self.feat_16(feat_8)) + self.se_h16(h_8, self.h_proj(h + h_8))
 
             # feat_16 = self.feat_proj(feat_16)
             feat_32 = self.feat_32(feat_16)
@@ -201,6 +216,7 @@ class Encoder(nn.Module):
             self.layers.append(DownBlock(in_ch, hidden_ch))
             in_ch = hidden_ch
         self.layers.append(nn.Conv2d(hidden_ch, out_ch, 1, 1))
+        self.layers.append(nn.InstanceNorm2d(out_ch, affine=False))
         self.layers = nn.Sequential(*self.layers)
 
         # self.flt_out = nn.Sequential(*[
@@ -222,19 +238,22 @@ class Encoder(nn.Module):
 
     def forward(self, x, z, c, **kwargs):
         enc = self.layers(x)
-        enc_mean = enc.mean([2,3], keepdims=True)
-        enc_var = (enc - enc_mean).square().mean([2,3], keepdims=True) + 1e-4
+
         n = len(enc)
-        pid = torch.randperm(n, device=enc.device)
-        scale = torch.rand(n, device=enc.device).view(-1, 1, 1, 1)
-        temp_min, temp_max = kwargs.get('temp_min', 0.0), kwargs.get('temp_max',1.0)
-        scale = temp_min + (temp_max - temp_min) * scale
+        t = torch.randint(
+            low=0, high=self.num_timesteps, size=(n // 2 + 1,)
+        ).to(enc.device)
+        t = torch.cat([t, self.num_timesteps - t - 1], dim=0)[:n]
+        temp_min, temp_max = kwargs.get("temp_min", 0.0), kwargs.get("temp_max", 1.0)
+        # temp_max = min(temp_max, 0.5)
+        # temp_min = min(temp_min, temp_max)
+        t = (t * (temp_max - temp_min) + self.num_timesteps * temp_min).floor().long()
+        alpha = compute_alpha(self.betas, t)
 
-        new_mean = enc_mean * scale + enc_mean * (1 - scale)
-        new_var = enc_var * scale + enc_var * (1 - scale)
-
-        out = (((enc - enc_mean) / enc_var.sqrt())) * new_var.sqrt() + new_mean
-        return out, z.unsqueeze(1), scale.squeeze(), pid
+        noise = torch.randn_like(enc, device=x.device)
+        out = (enc * alpha.sqrt() + noise * (1 - alpha).sqrt())
+        # out = enc
+        return out, z.unsqueeze(1), t/1000, enc
 
 class Generator(nn.Module):
     def __init__(
