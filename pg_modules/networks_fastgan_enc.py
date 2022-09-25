@@ -54,10 +54,10 @@ class FastganSynthesis(nn.Module):
 
         UpBlock = UpBlockSmall if lite else UpBlockBig
 
-        self.h_down_8 = DownBlock(32, 32)
-        self.h_down_4 = DownBlock(32, 32)
-        self.h_up_4 = UpBlock(32, 32)
-        self.h_up_8 = UpBlock(32, 32)
+        self.h_down_8 = DownBlock(32, nfc[16])
+        self.h_down_4 = DownBlock(nfc[16], nfc[8])
+        self.h_up_4 = UpBlock(nfc[8], nfc[16])
+        self.h_up_8 = UpBlock(nfc[16], 32)
 
         # self.feat_proj = BlockBig(nfc[16], nfc[16])
         self.h_proj = BlockBig(32, nfc[16])
@@ -69,8 +69,8 @@ class FastganSynthesis(nn.Module):
         self.feat_256 = UpBlock(nfc[128], nfc[256])
 
         self.se_init = SEBlock(32, nfc[16])
-        self.se_h4 = SEBlock(nfc[4], 32)
-        self.se_h8 = SEBlock(nfc[8], 32)
+        self.se_h4 = SEBlock(nfc[4], nfc[8])
+        self.se_h8 = SEBlock(nfc[8], nfc[16])
         self.se_h16 = SEBlock(32, nfc[16])
 
         self.se_64  = SEBlock(nfc[4], nfc[64])
