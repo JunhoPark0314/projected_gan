@@ -37,7 +37,7 @@ class FastganSynthesis(nn.Module):
 
         # layers
         self.init = InitLayer(z_dim, channel=nfc[2], sz=4)
-        self.h_init = InitLayer(z_dim, channel=nfc[2], sz=4)
+        # self.h_init = InitLayer(z_dim, channel=nfc[2], sz=4)
         # self.h_proj = nn.Conv2d(32, nfc[16], 1)
         # self.h_proj = nn.parameter.Parameter(torch.randn((32, nfc[8])))
         # self.h_gain = 1 / np.sqrt(32)
@@ -49,13 +49,13 @@ class FastganSynthesis(nn.Module):
         self.scale_bias = nn.Sequential(*[
             nn.Linear(128, 128),
             nn.LeakyReLU(0.2, inplace=True),
-            nn.Linear(128, z_dim),
+            nn.Linear(128, 32),
         ])
 
         UpBlock = UpBlockSmall if lite else UpBlockBig
 
         # self.feat_proj = BlockBig(nfc[16], nfc[16])
-        # self.h_ch_proj = BlockBig(32, 32)
+        self.h_proj = BlockBig(32, nfc[16])
         self.feat_8   = UpBlock(nfc[4], nfc[8])
         self.feat_16  = UpBlock(nfc[8], nfc[16])
         self.feat_32  = UpBlock(nfc[16], nfc[32])
@@ -63,7 +63,7 @@ class FastganSynthesis(nn.Module):
         self.feat_128 = UpBlock(nfc[64], nfc[128])
         self.feat_256 = UpBlock(nfc[128], nfc[256])
 
-        self.se_init = SEBlock(nfc[8], nfc[8])
+        self.se_init = SEBlock(32, nfc[16])
         self.se_64  = SEBlock(nfc[4], nfc[64])
         self.se_128 = SEBlock(nfc[8], nfc[128])
         self.se_256 = SEBlock(nfc[16], nfc[256])
@@ -81,16 +81,16 @@ class FastganSynthesis(nn.Module):
     def forward(self, h, input, c, scale, **kwargs):
             # map noise to hypersphere as in "Progressive Growing of GANS"
             input = normalize_second_moment(input[:, 0])
-            h = normalize_second_moment(h)
+            # h = normalize_second_moment(h)
 
             temb = get_timestep_embedding(scale.squeeze() * 1000, self.temb_ch)
             temb = self.scale_proj(temb)
-            t_bias = self.scale_bias(temb)
+            t_bias = self.scale_bias(temb)[...,None,None]
 
-            # feat_4 = self.init(input) 
-            feat_4 = self.h_init(h)
+            feat_4 = self.init(input) 
+            # feat_4 = self.h_init(h)
             feat_8 = self.feat_8(feat_4)
-            feat_16 = self.feat_16(feat_8)
+            feat_16 = self.se_init(h+t_bias, self.feat_16(feat_8)) + self.h_proj(h)
 
             # feat_16 = self.feat_proj(feat_16)
             feat_32 = self.feat_32(feat_16)
@@ -192,7 +192,7 @@ class Encoder(nn.Module):
     ):
         super().__init__()
         # self.out_ch = out_ch
-        num_layer = int(np.log2(img_resolution)) - 3
+        num_layer = int(np.log2(img_resolution)) - 4
         self.layers = []
         in_ch = img_channels
         # hidden_ch = hidden_ch
@@ -203,12 +203,14 @@ class Encoder(nn.Module):
         self.layers.append(nn.Conv2d(hidden_ch, out_ch, 1, 1))
         self.layers = nn.Sequential(*self.layers)
 
-        self.flt_out = nn.Sequential(*[
-            nn.Linear(8*8*out_ch, z_dim*2),
-            nn.LeakyReLU(0.2, inplace=True),
-            nn.Linear(z_dim*2, z_dim)
-        ])
-        self.out_norm = nn.LayerNorm((z_dim,), elementwise_affine=False)
+        # self.flt_out = nn.Sequential(*[
+        #     nn.Linear(8*8*out_ch, z_dim*2),
+        #     nn.LeakyReLU(0.2, inplace=True),
+        #     nn.Linear(z_dim*2, z_dim)
+        # ])
+        # self.out_norm = nn.LayerNorm((z_dim,), elementwise_affine=False)
+        # self.out_norm = nn.InstanceNorm2d(out_ch, affine=False)
+        # self.out_norm = nn.LayerNorm((out_ch,), affine=False)
 
         self.num_timesteps = 1000
         betas = get_beta_schedule(
@@ -219,32 +221,20 @@ class Encoder(nn.Module):
         self.register_buffer("betas", torch.tensor(betas).float())
 
     def forward(self, x, z, c, **kwargs):
-        x = DiffAugment(x, policy='color,cutout')
-
-        # enc = self.layers(x)
-        # enc = self.out(enc.reshape(-1, 32, 16*16).permute(0, 2, 1).reshape(-1, 32)).reshape(-1, 16*16, 32).permute(0, 2, 1).reshape(-1, 32, 16, 16)
-        # enc = self.out_norm(enc)
         enc = self.layers(x)
-        enc = self.flt_out(enc.reshape(x.shape[0], -1))
-        enc = self.out_norm(enc)
-        # enc = self.out(enc)
-        # enc = torch.nn.functional.interpolate(enc, 8, mode='bilinear', align_corners=False)
-
+        enc_mean = enc.mean([2,3], keepdims=True)
+        enc_var = (enc - enc_mean).square().mean([2,3], keepdims=True) + 1e-4
         n = len(enc)
-        t = torch.randint(
-            low=0, high=self.num_timesteps, size=(n // 2 + 1,)
-        ).to(enc.device)
-        t = torch.cat([t, self.num_timesteps - t - 1], dim=0)[:n]
-        temp_min, temp_max = kwargs.get("temp_min", 0.0), kwargs.get("temp_max", 1.0)
-        # temp_max = min(temp_max, 0.5)
-        # temp_min = min(temp_min, temp_max)
-        t = (t * (temp_max - temp_min) + self.num_timesteps * temp_min).floor().long()
-        alpha = compute_alpha(self.betas, t).view(-1, 1)
+        pid = torch.randperm(n, device=enc.device)
+        scale = torch.rand(n, device=enc.device).view(-1, 1, 1, 1)
+        temp_min, temp_max = kwargs.get('temp_min', 0.0), kwargs.get('temp_max',1.0)
+        scale = temp_min + (temp_max - temp_min) * scale
 
-        noise = torch.randn_like(enc, device=x.device)
-        out = (enc * alpha.sqrt() + noise * (1 - alpha).sqrt())
-        # out = enc
-        return out, z.unsqueeze(1), t/1000, enc
+        new_mean = enc_mean * scale + enc_mean * (1 - scale)
+        new_var = enc_var * scale + enc_var * (1 - scale)
+
+        out = (((enc - enc_mean) / enc_var.sqrt())) * new_var.sqrt() + new_mean
+        return out, z.unsqueeze(1), scale.squeeze(), pid
 
 class Generator(nn.Module):
     def __init__(
