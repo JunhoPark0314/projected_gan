@@ -277,7 +277,7 @@ class ProjectedPairDiscriminator(torch.nn.Module):
             scond=1,
             **backbone_kwargs,
         )
-        self.proj = nn.Conv2d(320, 32, 1, 1)
+        # self.proj = nn.Conv2d(320, 32, 1, 1)
         # self.pair_norm = nn.ModuleDict({
         #     str(i): nn.InstanceNorm2d(f, affine=False)
         #     for i, (f, r) in enumerate(zip([24, 40, 112, 320], [112, 56, 28, 14]))
@@ -328,7 +328,7 @@ class ProjectedPairDiscriminator(torch.nn.Module):
         semb = get_timestep_embedding(scale.squeeze() * 1000, self.temb_ch)
         semb = self.scale_proj(semb)
 
-        x2 = self.proj(x2)
+        # x2 = self.proj(x2)
 
         for k, v in features.items():
             x1_feat = v
