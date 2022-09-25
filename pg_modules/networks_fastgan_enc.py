@@ -251,9 +251,9 @@ class Encoder(nn.Module):
             low=0, high=self.num_timesteps, size=(n // 2 + 1,)
         ).to(enc.device)
         t = torch.cat([t, self.num_timesteps - t - 1], dim=0)[:n]
-        temp_min, temp_max = kwargs.get("temp_min", 0.0), kwargs.get("temp_max", 1.0)
-        # temp_max = min(temp_max, 0.5)
-        # temp_min = min(temp_min, temp_max)
+        temp_min, temp_max = kwargs.get("temp_min", 0.0), kwargs.get("temp_max", 0.75)
+        temp_max = min(temp_max, 0.75)
+        temp_min = min(temp_min, temp_max)
         t = (t * (temp_max - temp_min) + self.num_timesteps * temp_min).floor().long()
         alpha = compute_alpha(self.betas, t)
 
