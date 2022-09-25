@@ -112,11 +112,10 @@ class ProjectedGANPairLoss(Loss):
         self.warmup_nimg = 20 * 2**12
 
     def run_G(self, real_img, z, c, temp_max=None, update_emas=False, use_ema=False):
-        if use_ema:
-            h, ws, scale, enc = self.G_ema.mapping(real_img, z, c, temp_max=temp_max, update_emas=update_emas)
-        else:
-            h, ws, scale, enc = self.G.mapping(real_img, z, c, temp_max=temp_max, update_emas=update_emas)
-
+        # if use_ema:
+        #     h, ws, scale, enc = self.G_ema.mapping(real_img, z, c, temp_max=temp_max, update_emas=update_emas)
+        # else:
+        h, ws, scale, enc = self.G.mapping(real_img, z, c, temp_max=temp_max, update_emas=update_emas)
         high, low, h_proj = self.G.synthesis(h, ws, c, scale, update_emas=False)
         return high, low, scale.squeeze()[:,None], h_proj, enc
 
@@ -164,7 +163,7 @@ class ProjectedGANPairLoss(Loss):
                 gen_img_high, gen_img_low, scale, h_proj, enc = self.run_G(real_img, gen_z, gen_c, temp_max=warmup)
                 gen_logits = self.run_D(gen_img_high, h_proj, gen_c, scale, blur_sigma=blur_sigma)
                 loss_Gmain = (-gen_logits).mean()
-                loss_rec = (self.G_ema.synthesis.h_proj(enc) - self.G.synthesis.h_proj(h_proj)).square().mean()
+                # loss_rec = (self.G_ema.synthesis.h_proj(enc) - self.G.synthesis.h_proj(h_proj)).square().mean()
                 # gen_pair_logits = self.run_E(gen_img_low, h_proj, scale)
                 # loss_Gpair = (F.relu(torch.ones_like(gen_pair_logits) * (scale) - gen_pair_logits)).mean()
                 # loss_Gpair = (-gen_pair_logits).mean() * warmup

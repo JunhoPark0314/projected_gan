@@ -107,11 +107,15 @@ def UpBlockBig(in_planes, out_planes):
 
 def BlockBig(in_planes, out_planes):
     block = nn.Sequential(
-        conv2d(in_planes, in_planes*2, 3, 1, 1, bias=False),
-        NormLayer(in_planes*2), GLU(),
+        ResidualConvUnit(in_planes),
+        #conv2d(in_planes, in_planes*2, 3, 1, 1, bias=False),
+        NormLayer(in_planes),
+        nn.LeakyReLU(0.2, inplace=True),
         AttnBlock(in_planes),
-        conv2d(in_planes, out_planes*2, 3, 1, 1, bias=False),
-        NormLayer(out_planes*2), GLU(),
+        ResidualConvUnit(in_planes),
+        conv2d(in_planes, out_planes, 3, 1, 1, bias=False),
+        NormLayer(out_planes),
+        nn.LeakyReLU(0.2, inplace=True),
         )
     return block
 

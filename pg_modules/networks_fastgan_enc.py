@@ -59,7 +59,7 @@ class FastganSynthesis(nn.Module):
 
         UpBlock = UpBlockSmall if lite else UpBlockBig
 
-        self.h_proj = BlockBig(320, nfc[8])
+        self.h_proj = BlockBig(32, nfc[8])
         self.feat_proj = BlockBig(nfc[16], nfc[16])
         # self.h_ch_proj = BlockBig(32, 32)
         self.feat_8   = UpBlock(nfc[4], nfc[8])
@@ -199,7 +199,7 @@ class Encoder(nn.Module):
         img_channels,
         hidden_ch = 64,
         z_dim=256,
-		out_ch=320,
+		out_ch=32,
     ):
         super().__init__()
         # self.out_ch = out_ch
