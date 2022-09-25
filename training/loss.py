@@ -111,11 +111,11 @@ class ProjectedGANPairLoss(Loss):
         self.blur_fade_kimg = blur_fade_kimg
         self.warmup_nimg = 100 * 2**12
 
-    def run_G(self, real_img, z, c, temp_min=None, update_emas=False, use_ema=False):
+    def run_G(self, real_img, z, c, update_emas=False, use_ema=False):
         # if use_ema:
         #     h, ws, scale, enc = self.G_ema.mapping(real_img, z, c, temp_max=temp_max, update_emas=update_emas)
         # else:
-        h, ws, scale, enc = self.G.mapping(real_img, z, c, temp_min=temp_min, update_emas=update_emas)
+        h, ws, scale, enc = self.G.mapping(real_img, z, c, update_emas=update_emas)
         high, low, h_proj = self.G.synthesis(h, ws, c, scale, update_emas=False)
         return high, low, scale.squeeze()[:,None], h_proj, enc
 
@@ -160,7 +160,7 @@ class ProjectedGANPairLoss(Loss):
 
             # Gmain: Maximize logits for generated images.
             with torch.autograd.profiler.record_function('Gmain_forward'):
-                gen_img_high, gen_img_low, scale, h_proj, enc = self.run_G(real_img, gen_z, gen_c, temp_min=1 - warmup)
+                gen_img_high, gen_img_low, scale, h_proj, enc = self.run_G(real_img, gen_z, gen_c)
                 gen_logits = self.run_D(gen_img_high, h_proj, gen_c, scale, None, blur_sigma=blur_sigma)
                 loss_Gmain = (-gen_logits).mean()
                 # loss_rec = -((enc @ enc.T) / enc.shape[-1]).log_softmax(dim=-1).diag().mean()
@@ -183,7 +183,7 @@ class ProjectedGANPairLoss(Loss):
 
             # Dmain: Minimize logits for generated images.
             with torch.autograd.profiler.record_function('Dgen_forward'):
-                gen_img_high, gen_img_low, scale, h_proj, enc = self.run_G(real_img, gen_z, gen_c, temp_min=1-warmup, update_emas=True, use_ema=True)
+                gen_img_high, gen_img_low, scale, h_proj, enc = self.run_G(real_img, gen_z, gen_c, update_emas=True, use_ema=True)
                 gen_logits = self.run_D(gen_img_high, h_proj, gen_c, scale, None, blur_sigma=blur_sigma)
                 loss_Dgen = (F.relu(torch.ones_like(gen_logits) + gen_logits)).mean()
                 # gen_pair_logits = self.run_E(gen_img_low, h_proj, scale)
