@@ -27,9 +27,10 @@ class FastganSynthesis(nn.Module):
         self.img_resolution = img_resolution
         self.z_dim = z_dim
         self.temb_ch =512
+        self.out_ch = 256
 
         # channel multiplier
-        nfc_multi = {2: 16, 4:16, 8:8, 16:2, 32:2, 64:2, 128:1, 256:0.5,
+        nfc_multi = {2: 16, 4:16, 8:4, 16:2, 32:2, 64:2, 128:1, 256:0.5,
                      512:0.25, 1024:0.125, 2048:0.125}
         nfc = {}
         for k, v in nfc_multi.items():
@@ -49,7 +50,7 @@ class FastganSynthesis(nn.Module):
         self.scale_bias = nn.Sequential(*[
             nn.Linear(128, 128),
             nn.LeakyReLU(0.2, inplace=True),
-            nn.Linear(128, 32),
+            nn.Linear(128, self.out_ch),
         ])
         self.scale_bias_4 = nn.Sequential(*[
             nn.Linear(128, 128),
@@ -59,13 +60,13 @@ class FastganSynthesis(nn.Module):
 
         UpBlock = UpBlockSmall if lite else UpBlockBig
 
-        self.h_down_8 = DownBlock(32, nfc[16])
+        self.h_down_8 = DownBlock(self.out_ch, nfc[16])
         self.h_down_4 = DownBlock(nfc[16], nfc[8])
         self.h_up_4 = UpBlock(nfc[8], nfc[16])
-        self.h_up_8 = UpBlock(nfc[16], 32)
+        self.h_up_8 = UpBlock(nfc[16], self.out_ch)
 
         # self.feat_proj = BlockBig(nfc[16], nfc[16])
-        self.h_proj = BlockBig(32, nfc[16])
+        self.h_proj = BlockBig(self.out_ch, nfc[16])
         self.feat_8   = UpBlock(nfc[4], nfc[8])
         self.feat_16  = UpBlock(nfc[8], nfc[16])
         self.feat_32  = UpBlock(nfc[16], nfc[32])
@@ -73,10 +74,9 @@ class FastganSynthesis(nn.Module):
         self.feat_128 = UpBlock(nfc[64], nfc[128])
         self.feat_256 = UpBlock(nfc[128], nfc[256])
 
-        self.se_init = SEBlock(32, nfc[16])
+        self.se_init = SEBlock(self.out_ch, nfc[16])
         self.se_h4 = SEBlock(nfc[4], nfc[8])
         self.se_h8 = SEBlock(nfc[8], nfc[16])
-        self.se_h16 = SEBlock(32, nfc[16])
 
         self.se_64  = SEBlock(nfc[4], nfc[64])
         self.se_128 = SEBlock(nfc[8], nfc[128])
@@ -111,7 +111,7 @@ class FastganSynthesis(nn.Module):
             h_4 = self.h_up_4(self.se_h4(feat_4, h_4 + t_bias_4))
             h_8 = self.h_up_8(self.se_h8(feat_8, h_8 + h_4))
 
-            feat_16 = self.se_init(h+t_bias, self.feat_16(feat_8)) + self.se_h16(h_8, self.h_proj(h + h_8))
+            feat_16 = self.se_init(h_8, self.feat_16(feat_8)) + self.h_proj(h + h_8 + t_bias)
 
             # feat_16 = self.feat_proj(feat_16)
             feat_32 = self.feat_32(feat_16)
@@ -209,7 +209,7 @@ class Encoder(nn.Module):
         img_channels,
         hidden_ch = 64,
         z_dim=256,
-		out_ch=32,
+		out_ch=256,
     ):
         super().__init__()
         # self.out_ch = out_ch
@@ -218,6 +218,7 @@ class Encoder(nn.Module):
         in_ch = img_channels
         # hidden_ch = hidden_ch
 
+        self.out_ch = out_ch
         for i in range(num_layer):
             self.layers.append(DownBlock(in_ch, hidden_ch))
             in_ch = hidden_ch

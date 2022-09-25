@@ -277,12 +277,19 @@ class ProjectedPairDiscriminator(torch.nn.Module):
             **backbone_kwargs,
         )
         self.pair_discriminator = MultiScaleD(
-            channels=[f + 32 for f in self.feature_network.CHANNELS],
+            channels=[f*2 for f in self.feature_network.CHANNELS],
             # channels=self.feature_network.CHANNELS,
             resolutions=self.feature_network.RESOLUTIONS,
             scond=1,
             **backbone_kwargs,
         )
+        out_ch = 256
+        self.proj = nn.ModuleDict({
+            '0': nn.Conv2d(out_ch, self.feature_network.CHANNELS[0], 1, 1),
+            '1': nn.Conv2d(out_ch, self.feature_network.CHANNELS[1], 1, 1),
+            '2': nn.Conv2d(out_ch, self.feature_network.CHANNELS[2], 1, 1),
+            '3': nn.Conv2d(out_ch, self.feature_network.CHANNELS[3], 1, 1),
+        })
         # self.proj = nn.Conv2d(320, 32, 1, 1)
         # self.pair_norm = nn.ModuleDict({
         #     str(i): nn.InstanceNorm2d(f, affine=False)
@@ -339,8 +346,9 @@ class ProjectedPairDiscriminator(torch.nn.Module):
 
         for k, v in features.items():
             x1_feat = v
-            x2_feat = torch.nn.functional.interpolate(x2, size=(x1_feat.shape[2], x1_feat.shape[2]), mode='bilinear')
-            pair_features[k] = torch.cat([x1_feat, x2_feat], 1)
+            x2_feat_proj = self.proj[k](x2)
+            x2_feat_proj = torch.nn.functional.interpolate(x2_feat_proj, size=(x1_feat.shape[2], x1_feat.shape[2]), mode='bilinear')
+            pair_features[k] = torch.cat([x1_feat, x2_feat_proj], 1)
 
         logits = self.pair_discriminator(pair_features, c, semb)
 
