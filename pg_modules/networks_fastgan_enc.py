@@ -62,8 +62,8 @@ class FastganSynthesis(nn.Module):
 
         self.h_down_8 = DownBlock(self.out_ch, nfc[16])
         self.h_down_4 = DownBlock(nfc[16], nfc[8])
-        self.h_up_4 = UpBlock(nfc[8], nfc[16])
-        self.h_up_8 = UpBlock(nfc[16], self.out_ch)
+        self.h_up_4 = UpBlock(nfc[4], nfc[16])
+        self.h_up_8 = UpBlock(nfc[8], self.out_ch)
 
         # self.feat_proj = BlockBig(nfc[16], nfc[16])
         self.h_proj = BlockBig(self.out_ch, nfc[16])
