@@ -184,7 +184,7 @@ class ProjectedGANPairLoss(Loss):
             with torch.autograd.profiler.record_function('Dgen_forward'):
                 gen_img_high, gen_img_low, scale, h_proj, _ = self.run_G(real_img, gen_z, gen_c, temp_max=warmup, update_emas=True, use_ema=True)
                 gen_logits = self.run_D(gen_img_high, h_proj, gen_c, scale, blur_sigma=blur_sigma)
-                loss_Dgen = (F.relu(torch.ones_like(gen_logits) + gen_logits)).mean()
+                loss_Dgen = (F.relu((torch.ones_like(gen_logits) + scale.squeeze()[...,None]) + gen_logits)).mean()
                 # gen_pair_logits = self.run_E(gen_img_low, h_proj, scale)
                 # loss_Dpair_gen = (F.relu(torch.ones_like(gen_pair_logits) * (scale) + gen_pair_logits)).mean()
                 # loss_Dpair_gen = (F.relu(torch.ones_like(gen_pair_logits) + gen_pair_logits)).mean() * warmup
@@ -201,7 +201,7 @@ class ProjectedGANPairLoss(Loss):
                 real_img_high_tmp = real_img_high.detach().requires_grad_(False)
                 # real_img_low_tmp = real_img_low.detach().requires_grad_(False)
                 real_logits = self.run_D(real_img_high_tmp, h_proj, real_c, scale, blur_sigma=blur_sigma)
-                loss_Dreal = (F.relu(torch.ones_like(real_logits) - real_logits)).mean()
+                loss_Dreal = (F.relu(torch.ones_like(real_logits) + scale.squeeze()[...,None] - real_logits)).mean()
                 # real_pair_logits = self.run_E(real_img_low_tmp, h_proj, scale)
                 # loss_Dpair_real = (F.relu(torch.ones_like(real_pair_logits) * (scale) - real_pair_logits)).mean()
                 # loss_Dpair_real = (F.relu(torch.ones_like(real_pair_logits) - real_pair_logits)).mean() * warmup
