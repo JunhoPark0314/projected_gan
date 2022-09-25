@@ -261,7 +261,7 @@ class Encoder(nn.Module):
         noise = torch.randn_like(enc, device=x.device)
         out = (enc * alpha.sqrt() + noise * (1 - alpha).sqrt())
         # out = enc
-        return out, z.unsqueeze(1), t/1000, enc
+        return out, z.unsqueeze(1), t/1000, enc, alpha
 
 class Generator(nn.Module):
     def __init__(
