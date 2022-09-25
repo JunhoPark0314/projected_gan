@@ -37,7 +37,7 @@ class FastganSynthesis(nn.Module):
 
         # layers
         self.init = InitLayer(z_dim, channel=nfc[2], sz=4)
-        self.h_init = InitLayer(z_dim, channel=32, sz=16)
+        self.h_init = InitLayer(z_dim, channel=nfc[2], sz=4)
         # self.h_proj = nn.Conv2d(32, nfc[16], 1)
         # self.h_proj = nn.parameter.Parameter(torch.randn((32, nfc[8])))
         # self.h_gain = 1 / np.sqrt(32)
@@ -49,18 +49,12 @@ class FastganSynthesis(nn.Module):
         self.scale_bias = nn.Sequential(*[
             nn.Linear(128, 128),
             nn.LeakyReLU(0.2, inplace=True),
-            nn.Linear(128, nfc[8]),
-        ])
-        self.scale_16 = nn.Sequential(*[
-            nn.Linear(128, 128),
-            nn.LeakyReLU(0.2, inplace=True),
-            nn.Linear(128, 1),
+            nn.Linear(128, z_dim),
         ])
 
         UpBlock = UpBlockSmall if lite else UpBlockBig
 
-        self.h_proj = BlockBig(32, nfc[8])
-        self.feat_proj = BlockBig(nfc[16], nfc[16])
+        # self.feat_proj = BlockBig(nfc[16], nfc[16])
         # self.h_ch_proj = BlockBig(32, 32)
         self.feat_8   = UpBlock(nfc[4], nfc[8])
         self.feat_16  = UpBlock(nfc[8], nfc[16])
@@ -87,23 +81,18 @@ class FastganSynthesis(nn.Module):
     def forward(self, h, input, c, scale, **kwargs):
             # map noise to hypersphere as in "Progressive Growing of GANS"
             input = normalize_second_moment(input[:, 0])
+            h = normalize_second_moment(h)
+
             temb = get_timestep_embedding(scale.squeeze() * 1000, self.temb_ch)
             temb = self.scale_proj(temb)
-            # t_16 = self.scale_16(temb)
-            # t_scale_16 = t_16[:,:1].sigmoid()[...,None,None]
-            # t_bias_16 = t_16[:,1:][...,None,None]
             t_bias = self.scale_bias(temb)
 
-            feat_4 = self.init(input) 
-            # feat_h_init = self.h_init(input + t_bias)
+            # feat_4 = self.init(input) 
+            feat_4 = self.h_init(h)
             feat_8 = self.feat_8(feat_4)
-            # h_proj = self.h_proj(h)
-            main_feat_8 = self.se_init(feat_8, self.h_proj(h)) + t_bias[...,None,None]
-            # main_feat_8 = feat_8
+            feat_16 = self.feat_16(feat_8)
 
-            feat_16 = self.feat_16(main_feat_8) #* (1 - t_scale_16).sqrt() + h_proj * t_scale_16.sqrt()
-
-            feat_16 = self.feat_proj(feat_16)
+            # feat_16 = self.feat_proj(feat_16)
             feat_32 = self.feat_32(feat_16)
 
             feat_64 = self.se_64(feat_4, self.feat_64(feat_32))
@@ -213,7 +202,13 @@ class Encoder(nn.Module):
             in_ch = hidden_ch
         self.layers.append(nn.Conv2d(hidden_ch, out_ch, 1, 1))
         self.layers = nn.Sequential(*self.layers)
-        self.out_norm = nn.InstanceNorm2d(out_ch, affine=False)
+
+        self.flt_out = nn.Sequential(*[
+            nn.Linear(8*8*out_ch, z_dim*2),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Linear(z_dim*2, z_dim)
+        ])
+        self.out_norm = nn.LayerNorm((z_dim,), elementwise_affine=False)
 
         self.num_timesteps = 1000
         betas = get_beta_schedule(
@@ -224,12 +219,13 @@ class Encoder(nn.Module):
         self.register_buffer("betas", torch.tensor(betas).float())
 
     def forward(self, x, z, c, **kwargs):
-        # x = DiffAugment(x, policy='color,cutout')
+        x = DiffAugment(x, policy='color,cutout')
 
         # enc = self.layers(x)
         # enc = self.out(enc.reshape(-1, 32, 16*16).permute(0, 2, 1).reshape(-1, 32)).reshape(-1, 16*16, 32).permute(0, 2, 1).reshape(-1, 32, 16, 16)
         # enc = self.out_norm(enc)
         enc = self.layers(x)
+        enc = self.flt_out(enc.reshape(x.shape[0], -1))
         enc = self.out_norm(enc)
         # enc = self.out(enc)
         # enc = torch.nn.functional.interpolate(enc, 8, mode='bilinear', align_corners=False)
@@ -243,7 +239,7 @@ class Encoder(nn.Module):
         # temp_max = min(temp_max, 0.5)
         # temp_min = min(temp_min, temp_max)
         t = (t * (temp_max - temp_min) + self.num_timesteps * temp_min).floor().long()
-        alpha = compute_alpha(self.betas, t)
+        alpha = compute_alpha(self.betas, t).view(-1, 1)
 
         noise = torch.randn_like(enc, device=x.device)
         out = (enc * alpha.sqrt() + noise * (1 - alpha).sqrt())
