@@ -92,7 +92,7 @@ class FastganSynthesis(nn.Module):
         if img_resolution > 512:
             self.feat_1024 = UpBlock(nfc[512], nfc[1024])
 
-    def forward(self, h, input, c, scale, **kwargs):
+    def forward(self, h, input, c, scale, alpha, **kwargs):
             # map noise to hypersphere as in "Progressive Growing of GANS"
             input = normalize_second_moment(input[:, 0])
             # h = normalize_second_moment(h)
@@ -110,7 +110,7 @@ class FastganSynthesis(nn.Module):
 
             h_4 = self.h_up_4(self.se_h4(feat_4, h_4 + t_bias_4))
             h_8 = self.h_up_8(self.se_h8(feat_8, h_8 + h_4))
-            denoised_h = (h + h_8)
+            denoised_h = (h + h_8 * (1 - alpha).sqrt()) / alpha.sqrt()
 
             feat_16 = self.se_init(denoised_h, self.feat_16(feat_8)) + self.h_proj(denoised_h)
 
@@ -289,8 +289,8 @@ class Generator(nn.Module):
         self.synthesis = Synthesis(ngf=ngf, z_dim=z_dim, nc=img_channels, img_resolution=img_resolution, **synthesis_kwargs)
 
     def forward(self, x, z, c, return_small=False, **kwargs):
-        h, w, scale, enc = self.mapping(x, z, c, **kwargs)
-        high_res, low_res, denoised_h = self.synthesis(h, w, c, scale)
+        h, w, scale, alpha, enc = self.mapping(x, z, c, **kwargs)
+        high_res, low_res, denoised_h = self.synthesis(h, w, c, scale, alpha)
         if return_small:
             return high_res, low_res, scale, denoised_h, enc
         return high_res
