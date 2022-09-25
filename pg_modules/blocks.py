@@ -222,7 +222,7 @@ class DownBlockPatch(nn.Module):
 
 
 class ResidualConvUnit(nn.Module):
-    def __init__(self, cin, activation, bn):
+    def __init__(self, cin):
         super().__init__()
         self.conv = nn.Conv2d(cin, cin, kernel_size=3, stride=1, padding=1, bias=True)
         self.skip_add = nn.quantized.FloatFunctional()
