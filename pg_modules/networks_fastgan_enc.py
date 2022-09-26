@@ -30,7 +30,7 @@ class FastganSynthesis(nn.Module):
         self.out_ch = 256
 
         # channel multiplier
-        nfc_multi = {2: 16, 4:16, 8:8, 16:4, 32:2, 64:2, 128:1, 256:0.5,
+        nfc_multi = {2: 16, 4:16, 8:4, 16:4, 32:2, 64:2, 128:1, 256:0.5,
                      512:0.25, 1024:0.125, 2048:0.125}
         nfc = {}
         for k, v in nfc_multi.items():
@@ -119,7 +119,7 @@ class FastganSynthesis(nn.Module):
             # denoised_h = (h.detach() + h_8 * (1 - alpha).sqrt())
             main_feat8 = self.se_init(denoised_h, feat_8)
 
-            feat_16 = self.feat_16(main_feat8) * t_scale_16.sqrt() + self.h_proj(denoised_h + h_8) * (1 - t_scale_16).sqrt()
+            feat_16 = self.feat_16(main_feat8) * t_scale_16.sqrt() + self.h_proj(denoised_h) * (1 - t_scale_16).sqrt()
 
             # feat_16 = self.feat_proj(feat_16)
             feat_32 = self.feat_32(feat_16)
@@ -260,7 +260,7 @@ class Encoder(nn.Module):
         ).to(enc.device)
         t = torch.cat([t, self.num_timesteps - t - 1], dim=0)[:n]
         temp_min, temp_max = kwargs.get("temp_min", 0.0), kwargs.get("temp_max", 1.0)
-        temp_max = min(temp_max, 0.75)
+        temp_max = min(temp_max, 0.6)
         temp_min = min(temp_min, temp_max)
         t = (t * (temp_max - temp_min) + self.num_timesteps * temp_min).floor().long()
         alpha = compute_alpha(self.betas, t)

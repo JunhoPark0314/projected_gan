@@ -12,7 +12,7 @@ from pg_modules.diffaug import DiffAugment
 
 
 class SingleDisc(nn.Module):
-    def __init__(self, nc=None, ndf=None, start_sz=256, end_sz=8, head=None, separable=False, patch=False):
+    def __init__(self, nc=None, ndf=None, start_sz=256, end_sz=8, head=None, separable=False, patch=False, norm='batch'):
         super().__init__()
         channel_dict = {4: 512, 8: 512, 16: 256, 32: 128, 64: 64, 128: 64,
                         256: 32, 512: 16, 1024: 8}
@@ -42,7 +42,7 @@ class SingleDisc(nn.Module):
                        nn.LeakyReLU(0.2, inplace=True)]
 
         # Down Blocks
-        DB = partial(DownBlockPatch, separable=separable) if patch else partial(DownBlock, separable=separable)
+        DB = partial(DownBlockPatch, separable=separable, norm=norm) if patch else partial(DownBlock, separable=separable, norm=norm)
         while start_sz > end_sz:
             layers.append(DB(nfc[start_sz],  nfc[start_sz//2]))
             start_sz = start_sz // 2
@@ -54,7 +54,7 @@ class SingleDisc(nn.Module):
         return self.main(x)
 
 class SingleDiscScond(nn.Module):
-    def __init__(self, nc=None, ndf=None, start_sz=256, end_sz=8, head=None, separable=False, patch=False, semb_ch=256):
+    def __init__(self, nc=None, ndf=None, start_sz=256, end_sz=8, head=None, separable=False, patch=False, semb_ch=256, norm='batch'):
         super().__init__()
         channel_dict = {4: 512, 8: 512, 16: 256, 32: 128, 64: 64, 128: 64,
                         256: 32, 512: 16, 1024: 8}
@@ -92,7 +92,7 @@ class SingleDiscScond(nn.Module):
             ])]
 
         # Down Blocks
-        DB = partial(DownBlockPatch, separable=separable) if patch else partial(DownBlock, separable=separable)
+        DB = partial(DownBlockPatch, separable=separable, norm=norm) if patch else partial(DownBlock, separable=separable, norm=norm)
         while start_sz > end_sz:
             layers.append(DB(nfc[start_sz],  nfc[start_sz//2]))
             semb_lin = nn.Linear(self.temb_ch, nfc[start_sz//2])
@@ -186,6 +186,7 @@ class MultiScaleD(nn.Module):
         scond=0,
         separable=False,
         patch=False,
+        norm='batch',
         **kwargs,
     ):
         super().__init__()
@@ -201,7 +202,7 @@ class MultiScaleD(nn.Module):
         mini_discs = []
         for i, (cin, res) in enumerate(zip(self.disc_in_channels, self.disc_in_res)):
             start_sz = res if not patch else 16
-            mini_discs += [str(i), Disc(nc=cin, start_sz=start_sz, end_sz=8, separable=separable, patch=patch)],
+            mini_discs += [str(i), Disc(nc=cin, start_sz=start_sz, end_sz=8, separable=separable, patch=patch, norm=norm)],
         self.mini_discs = nn.ModuleDict(mini_discs)
 
     def forward(self, features, c, scale=None):
@@ -280,6 +281,7 @@ class ProjectedPairDiscriminator(torch.nn.Module):
             channels=[f*2 for f in self.feature_network.CHANNELS],
             # channels=self.feature_network.CHANNELS,
             resolutions=self.feature_network.RESOLUTIONS,
+            norm='instance',
             scond=1,
             **backbone_kwargs,
         )
@@ -291,10 +293,10 @@ class ProjectedPairDiscriminator(torch.nn.Module):
             '3': nn.Conv2d(out_ch, self.feature_network.CHANNELS[3], 1, 1),
         })
         # self.proj = nn.Conv2d(320, 32, 1, 1)
-        # self.pair_norm = nn.ModuleDict({
-        #     str(i): nn.InstanceNorm2d(f, affine=False)
-        #     for i, (f, r) in enumerate(zip([24, 40, 112, 320], [112, 56, 28, 14]))
-        # })
+        self.pair_norm = nn.ModuleDict({
+            str(i): nn.InstanceNorm2d(f, affine=False)
+            for i, (f, r) in enumerate(zip([24, 40, 112, 320], [112, 56, 28, 14]))
+        })
 
 
     def train(self, mode=True):
@@ -334,22 +336,26 @@ class ProjectedPairDiscriminator(torch.nn.Module):
         x = F.interpolate(x, 224, mode='bilinear', align_corners=False)
         
         features = self.feature_network.pretrain_forward(x)
+        pair_features = {k:self.pair_norm[k](v) for k,v in features.items()}
+
         features = self.feature_network.proj_forward(features)
+        pair_features = self.feature_network.proj_forward(pair_features)
+
         if scale == None:
             scale = torch.ones((len(x), 1, 1, 1), device=x.device)
 
-        pair_features = {}
         semb = get_timestep_embedding(scale.squeeze() * 1000, self.temb_ch)
         semb = self.scale_proj(semb)
 
         # x2 = self.proj(x2)
 
-        for k, v in features.items():
+        for k, v in pair_features.items():
             x1_feat = v
             x2_feat_proj = self.proj[k](x2)
             x2_feat_proj = torch.nn.functional.interpolate(x2_feat_proj, size=(x1_feat.shape[2], x1_feat.shape[2]), mode='bilinear')
             pair_features[k] = torch.cat([x1_feat, x2_feat_proj], 1)
 
-        logits = self.pair_discriminator(pair_features, c, semb)
+        pair_logits = self.pair_discriminator(pair_features, c, semb)
+        logits = self.discriminator(features, c, semb)
 
-        return logits
+        return torch.cat([logits, pair_logits], 1)

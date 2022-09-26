@@ -29,6 +29,8 @@ def NormLayer(c, mode='batch'):
         return nn.GroupNorm(c//2, c)
     elif mode == 'batch':
         return nn.BatchNorm2d(c)
+    elif mode == 'instance':
+        return nn.InstanceNorm2d(c)
 
 
 ### Activations
