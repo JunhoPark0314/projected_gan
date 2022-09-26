@@ -75,7 +75,7 @@ class FastganSynthesis(nn.Module):
         self.feat_128 = UpBlock(nfc[64], nfc[128])
         self.feat_256 = UpBlock(nfc[128], nfc[256])
 
-        self.se_init = SEBlock(self.out_ch, nfc[16])
+        self.se_init = SEBlock(self.out_ch, nfc[8])
         self.se_h4 = SEBlock(nfc[4], nfc[8])
         self.se_h8 = SEBlock(nfc[8], nfc[16])
 
@@ -114,8 +114,9 @@ class FastganSynthesis(nn.Module):
             # h_4 = self.h_up_4(h_4 + t_bias_4)
             # h_8 = self.h_up_8(h_8 + h_4)
             denoised_h = (h.detach() + h_8)
+            main_feat8 = self.se_init(h + h_8, feat_8)
 
-            feat_16 = self.se_init(h + h_8, self.feat_16(feat_8)) + self.h_proj(h + h_8)
+            feat_16 = self.feat_16(main_feat8) + self.h_proj(h + h_8)
 
             # feat_16 = self.feat_proj(feat_16)
             feat_32 = self.feat_32(feat_16)
