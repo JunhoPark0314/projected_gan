@@ -105,6 +105,18 @@ def UpBlockBig(in_planes, out_planes):
         )
     return block
 
+def UpBlockDenoise(in_planes, out_planes):
+    block = nn.Sequential(
+        nn.Upsample(scale_factor=2, mode='bilinear'),
+        conv2d(in_planes, out_planes, 3, 1, 1),
+        NormLayer(out_planes),
+        nn.LeakyReLU(0.2, inplace=True),
+        conv2d(out_planes, out_planes, 3, 1, 1),
+        NormLayer(out_planes),
+        nn.LeakyReLU(0.2, inplace=True),
+    )
+    return block
+
 def BlockBig(in_planes, out_planes):
     block = nn.Sequential(
         ResidualConvUnit(in_planes),

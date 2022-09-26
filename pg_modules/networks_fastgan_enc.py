@@ -5,7 +5,7 @@
 import torch.nn as nn
 from ddim.models.diffusion import FullyConnectedLayer
 from torch_utils.misc import compute_alpha, get_timestep_embedding, get_beta_schedule
-from pg_modules.blocks import (AttnBlock, BlockBig, DownBlock, InitLayer, UpBlockBig, UpBlockBigCond, UpBlockSmall, UpBlockSmallCond, SEBlock, conv2d)
+from pg_modules.blocks import (AttnBlock, BlockBig, DownBlock, InitLayer, UpBlockBig, UpBlockBigCond, UpBlockDenoise, UpBlockSmall, UpBlockSmallCond, SEBlock, conv2d)
 import torch
 
 from pg_modules.diffaug import DiffAugment
@@ -62,8 +62,9 @@ class FastganSynthesis(nn.Module):
 
         self.h_down_8 = DownBlock(self.out_ch, nfc[16])
         self.h_down_4 = DownBlock(nfc[16], nfc[8])
-        self.h_up_4 = UpBlock(nfc[8], nfc[16])
-        self.h_up_8 = UpBlock(nfc[16], self.out_ch)
+
+        self.h_up_4 = UpBlockDenoise(nfc[8], nfc[16])
+        self.h_up_8 = UpBlockDenoise(nfc[16], self.out_ch)
 
         # self.feat_proj = BlockBig(nfc[16], nfc[16])
         self.h_proj = BlockBig(self.out_ch, nfc[16])
@@ -108,8 +109,8 @@ class FastganSynthesis(nn.Module):
             feat_4 = self.init(input) 
             feat_8 = self.feat_8(feat_4)
 
-            h_4 = self.h_up_4(self.se_h4(feat_4, h_4 + t_bias_4))
-            h_8 = self.h_up_8(self.se_h8(feat_8, h_8 + h_4))
+            h_4 = self.h_up_4(h_4 + t_bias_4)
+            h_8 = self.h_up_8(h_8 + h_4)
             # h_4 = self.h_up_4(h_4 + t_bias_4)
             # h_8 = self.h_up_8(h_8 + h_4)
             denoised_h = (h.detach() + h_8)
