@@ -47,10 +47,10 @@ class FastganSynthesis(nn.Module):
             nn.Linear(self.temb_ch, 128),
             nn.LeakyReLU(0.2, inplace=True),
         ])
-        self.scale_bias = nn.Sequential(*[
+        self.scale_bias_16 = nn.Sequential(*[
             nn.Linear(128, 128),
             nn.LeakyReLU(0.2, inplace=True),
-            nn.Linear(128, self.out_ch),
+            nn.Linear(128, 1),
         ])
         self.scale_bias_4 = nn.Sequential(*[
             nn.Linear(128, 128),
@@ -102,7 +102,7 @@ class FastganSynthesis(nn.Module):
 
             temb = get_timestep_embedding(scale.squeeze() * 1000, self.temb_ch)
             temb = self.scale_proj(temb)
-            # t_bias = self.scale_bias(temb)[...,None,None]
+            t_scale_16 = self.scale_bias_16(temb)[...,None,None].sigmoid()
             t_bias_4 = self.scale_bias_4(temb)[...,None,None]
 
             h_8 = self.h_down_8(h.detach())
@@ -119,7 +119,7 @@ class FastganSynthesis(nn.Module):
             # denoised_h = (h.detach() + h_8 * (1 - alpha).sqrt())
             main_feat8 = self.se_init(denoised_h, feat_8)
 
-            feat_16 = self.feat_16(main_feat8) + self.h_proj(denoised_h + h_8)
+            feat_16 = self.feat_16(main_feat8) * t_scale_16.sqrt() + self.h_proj(denoised_h + h_8) * (1 - t_scale_16).sqrt()
 
             # feat_16 = self.feat_proj(feat_16)
             feat_32 = self.feat_32(feat_16)
@@ -260,8 +260,8 @@ class Encoder(nn.Module):
         ).to(enc.device)
         t = torch.cat([t, self.num_timesteps - t - 1], dim=0)[:n]
         temp_min, temp_max = kwargs.get("temp_min", 0.0), kwargs.get("temp_max", 1.0)
-        # temp_max = min(temp_max, 0.5)
-        # temp_min = min(temp_min, temp_max)
+        temp_max = min(temp_max, 0.75)
+        temp_min = min(temp_min, temp_max)
         t = (t * (temp_max - temp_min) + self.num_timesteps * temp_min).floor().long()
         alpha = compute_alpha(self.betas, t)
 
