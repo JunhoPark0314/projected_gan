@@ -350,7 +350,7 @@ class ProjectedPairDiscriminator(torch.nn.Module):
         # x2 = self.proj(x2)
 
         for k, v in pair_features.items():
-            x1_feat = v
+            x1_feat = v * scale.sqrt() + torch.randn_like(v, device=v.device) * (1 - scale).sqrt()
             x2_feat_proj = self.proj[k](x2)
             x2_feat_proj = torch.nn.functional.interpolate(x2_feat_proj, size=(x1_feat.shape[2], x1_feat.shape[2]), mode='bilinear')
             pair_features[k] = torch.cat([x1_feat, x2_feat_proj], 1)
