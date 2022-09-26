@@ -30,7 +30,7 @@ class FastganSynthesis(nn.Module):
         self.out_ch = 256
 
         # channel multiplier
-        nfc_multi = {2: 16, 4:8, 8:4, 16:4, 32:2, 64:2, 128:1, 256:0.5,
+        nfc_multi = {2: 8, 4:8, 8:4, 16:4, 32:2, 64:2, 128:1, 256:0.5,
                      512:0.25, 1024:0.125, 2048:0.125}
         nfc = {}
         for k, v in nfc_multi.items():
@@ -78,8 +78,8 @@ class FastganSynthesis(nn.Module):
         self.feat_256 = UpBlock(nfc[128], nfc[256])
 
         self.se_init = SEBlock(self.out_ch, nfc[8])
-        self.se_h4 = SEBlock(nfc[4], nfc[8])
-        self.se_h8 = SEBlock(nfc[8], nfc[16])
+        self.se_h4 = SEBlock(self.out_ch, nfc[4])
+        self.se_h8 = SEBlock(self.out_ch, nfc[8])
 
         self.se_64  = SEBlock(nfc[4], nfc[64])
         self.se_128 = SEBlock(nfc[8], nfc[128])
@@ -105,21 +105,16 @@ class FastganSynthesis(nn.Module):
             t_scale_16 = self.scale_bias_16(temb)[...,None,None].sigmoid()
             t_bias_4 = self.scale_bias_4(temb)[...,None,None]
 
+            # denoise step
             h_8 = self.h_down_8(h.detach())
             h_4 = self.h_down_4(h_8)
-
-            feat_4 = self.init(input) 
-            feat_8 = self.feat_8(feat_4)
-
             h_4 = self.h_up_4(h_4 + t_bias_4)
             h_8 = self.h_zero(self.h_up_8(h_8 + h_4)) * (1 - alpha).sqrt()
             denoised_h = (h + h_8) / alpha.sqrt()
-            # h_4 = self.h_up_4(h_4 + t_bias_4)
-            # h_8 = self.h_up_8(h_8 + h_4)
-            # denoised_h = (h.detach() + h_8 * (1 - alpha).sqrt())
-            main_feat8 = self.se_init(denoised_h, feat_8)
 
-            feat_16 = self.feat_16(main_feat8) * t_scale_16.sqrt() + self.h_proj(denoised_h) * (1 - t_scale_16).sqrt()
+            feat_4 = self.se_h4(denoised_h, self.init(input))
+            feat_8 = self.se_h8(denoised_h, self.feat_8(feat_4))
+            feat_16 = self.feat_16(feat_8) * t_scale_16.sqrt() + self.h_proj(denoised_h) * (1 - t_scale_16).sqrt()
 
             # feat_16 = self.feat_proj(feat_16)
             feat_32 = self.feat_32(feat_16)
