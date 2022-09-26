@@ -281,7 +281,7 @@ class ProjectedPairDiscriminator(torch.nn.Module):
             channels=[f*2 for f in self.feature_network.CHANNELS],
             # channels=self.feature_network.CHANNELS,
             resolutions=self.feature_network.RESOLUTIONS,
-            norm='instance',
+            norm='group',
             scond=1,
             **backbone_kwargs,
         )
@@ -330,7 +330,7 @@ class ProjectedPairDiscriminator(torch.nn.Module):
 
     #     return logits
 
-    def forward(self, x1, x2, c=None, scale=None, pid=None):
+    def forward(self, x1, x2, c=None, scale=None, alpha=None):
         x = x1
         x = DiffAugment(x, policy='color,translation,cutout')
         x = F.interpolate(x, 224, mode='bilinear', align_corners=False)
@@ -349,8 +349,12 @@ class ProjectedPairDiscriminator(torch.nn.Module):
 
         # x2 = self.proj(x2)
 
+        if alpha == None:
+            alpha = torch.ones((len(x), 1, 1, 1), device=x.device)
+
+        alpha = alpha.view(-1, 1, 1, 1)
         for k, v in pair_features.items():
-            x1_feat = v * scale.sqrt() + torch.randn_like(v, device=v.device) * (1 - scale).sqrt()
+            x1_feat = v * alpha.sqrt() + torch.randn_like(v, device=v.device) * (1 - alpha).sqrt()
             x2_feat_proj = self.proj[k](x2)
             x2_feat_proj = torch.nn.functional.interpolate(x2_feat_proj, size=(x1_feat.shape[2], x1_feat.shape[2]), mode='bilinear')
             pair_features[k] = torch.cat([x1_feat, x2_feat_proj], 1)

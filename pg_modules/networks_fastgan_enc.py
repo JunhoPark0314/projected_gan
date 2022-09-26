@@ -37,7 +37,7 @@ class FastganSynthesis(nn.Module):
             nfc[k] = int(v*ngf)
 
         # layers
-        self.init = InitLayer(z_dim, channel=nfc[2], sz=4)
+        self.init = InitLayer(z_dim, channel=nfc[4], sz=4)
         # self.h_init = InitLayer(z_dim, channel=nfc[2], sz=4)
         # self.h_proj = nn.Conv2d(32, nfc[16], 1)
         # self.h_proj = nn.parameter.Parameter(torch.randn((32, nfc[8])))
