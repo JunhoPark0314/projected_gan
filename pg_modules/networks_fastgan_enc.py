@@ -293,7 +293,7 @@ class Generator(nn.Module):
         self.synthesis = Synthesis(ngf=ngf, z_dim=z_dim, nc=img_channels, img_resolution=img_resolution, **synthesis_kwargs)
 
     def forward(self, x, z, c, return_small=False, **kwargs):
-        h, w, scale, alpha, enc = self.mapping(x, z, c, **kwargs)
+        h, w, scale, enc, alpha = self.mapping(x, z, c, **kwargs)
         high_res, low_res, denoised_h = self.synthesis(h, w, c, scale, alpha)
         if return_small:
             return high_res, low_res, scale, denoised_h, enc
