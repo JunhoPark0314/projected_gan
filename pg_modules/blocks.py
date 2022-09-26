@@ -109,10 +109,10 @@ def UpBlockDenoise(in_planes, out_planes):
     block = nn.Sequential(
         nn.Upsample(scale_factor=2, mode='bilinear'),
         conv2d(in_planes, out_planes, 3, 1, 1),
-        NormLayer(out_planes),
+        NormLayer(out_planes, 'group'),
         nn.LeakyReLU(0.2, inplace=True),
         conv2d(out_planes, out_planes, 3, 1, 1),
-        NormLayer(out_planes),
+        NormLayer(out_planes, 'group'),
         nn.LeakyReLU(0.2, inplace=True),
     )
     return block
@@ -196,18 +196,18 @@ class SeparableConv2d(nn.Module):
 
 
 class DownBlock(nn.Module):
-    def __init__(self, in_planes, out_planes, separable=False):
+    def __init__(self, in_planes, out_planes, separable=False, norm='batch'):
         super().__init__()
         if not separable:
             self.main = nn.Sequential(
                 conv2d(in_planes, out_planes, 4, 2, 1),
-                NormLayer(out_planes),
+                NormLayer(out_planes, norm),
                 nn.LeakyReLU(0.2, inplace=True),
             )
         else:
             self.main = nn.Sequential(
                 SeparableConv2d(in_planes, out_planes, 3),
-                NormLayer(out_planes),
+                NormLayer(out_planes, norm),
                 nn.LeakyReLU(0.2, inplace=True),
                 nn.AvgPool2d(2, 2),
             )

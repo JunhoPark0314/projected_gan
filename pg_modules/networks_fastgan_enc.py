@@ -60,11 +60,13 @@ class FastganSynthesis(nn.Module):
 
         UpBlock = UpBlockSmall if lite else UpBlockBig
 
-        self.h_down_8 = DownBlock(self.out_ch, nfc[16])
-        self.h_down_4 = DownBlock(nfc[16], nfc[8])
+        self.h_down_8 = DownBlock(self.out_ch, nfc[16], norm='group')
+        self.h_down_4 = DownBlock(nfc[16], nfc[8], norm='group')
 
         self.h_up_4 = UpBlockDenoise(nfc[8], nfc[16])
         self.h_up_8 = UpBlockDenoise(nfc[16], self.out_ch)
+        self.h_zero = nn.Conv2d(self.out_ch, self.out_ch, 1, 1)
+        nn.init.constant_(self.h_zero.weight, 0)
 
         # self.feat_proj = BlockBig(nfc[16], nfc[16])
         self.h_proj = BlockBig(self.out_ch, nfc[16])
@@ -110,13 +112,14 @@ class FastganSynthesis(nn.Module):
             feat_8 = self.feat_8(feat_4)
 
             h_4 = self.h_up_4(h_4 + t_bias_4)
-            h_8 = self.h_up_8(h_8 + h_4)
+            h_8 = self.h_zero(self.h_up_8(h_8 + h_4)) * (1 - alpha).sqrt()
+            denoised_h = (h + h_8) / alpha.sqrt()
             # h_4 = self.h_up_4(h_4 + t_bias_4)
             # h_8 = self.h_up_8(h_8 + h_4)
-            denoised_h = (h.detach() + h_8 * (1 - alpha).sqrt())
-            main_feat8 = self.se_init(h + h_8, feat_8)
+            # denoised_h = (h.detach() + h_8 * (1 - alpha).sqrt())
+            main_feat8 = self.se_init(denoised_h, feat_8)
 
-            feat_16 = self.feat_16(main_feat8) + self.h_proj(h + h_8)
+            feat_16 = self.feat_16(main_feat8) + self.h_proj(denoised_h + h_8)
 
             # feat_16 = self.feat_proj(feat_16)
             feat_32 = self.feat_32(feat_16)
@@ -137,7 +140,7 @@ class FastganSynthesis(nn.Module):
                 feat_last = self.feat_1024(feat_last)
 
             out = self.to_big(feat_last)
-            return out, None, denoised_h
+            return out, None, (h.detach() + h_8) / alpha.sqrt()
 
 
 class FastganSynthesisCond(nn.Module):
