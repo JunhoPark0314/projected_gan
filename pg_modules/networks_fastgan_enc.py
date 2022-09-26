@@ -100,7 +100,7 @@ class FastganSynthesis(nn.Module):
 
             temb = get_timestep_embedding(scale.squeeze() * 1000, self.temb_ch)
             temb = self.scale_proj(temb)
-            t_bias = self.scale_bias(temb)[...,None,None]
+            # t_bias = self.scale_bias(temb)[...,None,None]
             t_bias_4 = self.scale_bias_4(temb)[...,None,None]
 
             h_8 = self.h_down_8(h.detach())
@@ -113,7 +113,7 @@ class FastganSynthesis(nn.Module):
             h_8 = self.h_up_8(h_8 + h_4)
             # h_4 = self.h_up_4(h_4 + t_bias_4)
             # h_8 = self.h_up_8(h_8 + h_4)
-            denoised_h = (h.detach() + h_8)
+            denoised_h = (h.detach() + h_8 * (1 - alpha).sqrt())
             main_feat8 = self.se_init(h + h_8, feat_8)
 
             feat_16 = self.feat_16(main_feat8) + self.h_proj(h + h_8)
