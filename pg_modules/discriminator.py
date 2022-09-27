@@ -296,7 +296,7 @@ class ProjectedPairDiscriminator(torch.nn.Module):
         })
         # self.proj = nn.Conv2d(320, 32, 1, 1)
         self.pair_norm = nn.ModuleDict({
-            str(i): nn.InstanceNorm2d(f, affine=False) if r > 32 else nn.Identity()
+            str(i): nn.InstanceNorm2d(f, affine=False)
             for i, (f, r) in enumerate(zip([24, 40, 112, 320], [112, 56, 28, 14]))
         })
 
@@ -359,8 +359,8 @@ class ProjectedPairDiscriminator(torch.nn.Module):
         st = 0
         for k, v in pair_features.items():
             if self.proj[k] != None:
-                # x1_feat = v * alpha.sqrt() + torch.randn_like(v, device=v.device) * (1 - alpha).sqrt()
-                x1_feat = v
+                x1_feat = v * alpha.sqrt() + torch.randn_like(v, device=v.device) * (1 - alpha).sqrt()
+                # x1_feat = v
                 x2_feat_proj = self.proj[k](x2)
                 x2_feat_proj = torch.nn.functional.interpolate(x2_feat_proj, size=(x1_feat.shape[2], x1_feat.shape[2]), mode='bilinear')
                 proj_pair_features[str(st)] = torch.cat([x1_feat, x2_feat_proj], 1)
