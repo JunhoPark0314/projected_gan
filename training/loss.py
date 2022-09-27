@@ -19,6 +19,32 @@ class Loss:
     def accumulate_gradients(self, phase, real_img, real_c, gen_z, gen_c, gain, cur_nimg): # to be overridden by subclass
         raise NotImplementedError()
 
+class DDIM_Loss(Loss):
+    def __init__(self, device, G_ema, DDIM, diffusion,**kwargs):
+        super().__init__()
+        self.device = device
+        self.G_ema = G_ema
+        self.DDIM = DDIM
+        self.diffusion = diffusion
+
+    def run_G(self, real_img, update_emas=False):
+        t = self.diffusion.sample_timestep(len(real_img))
+        h = self.G_ema.mapping.layers(real_img)
+        h_noised, eps, alpha = self.diffusion.sample_noised(h, t)
+        trg_eps = self.DDIM(h_noised, t.float())
+        return trg_eps, eps, alpha
+
+    def accumulate_gradients(self, phase, real_img, cur_nimg):
+        assert phase in ['DDIMboth']
+        # Gmain: Maximize logits for generated images.
+        with torch.autograd.profiler.record_function('Gmain_forward'):
+            pred_eps, trg_eps, alpha = self.run_G(real_img)
+            loss_Rec = (pred_eps - trg_eps).square().sum([1,2,3]).mean()
+            # Logging
+            training_stats.report('Loss/DDIM/loss_rec', loss_Rec)
+
+        with torch.autograd.profiler.record_function('Gmain_backward'):
+            loss_Rec.backward()
 
 class ProjectedGANLoss(Loss):
     def __init__(self, device, G, D, G_ema, blur_init_sigma=0, blur_fade_kimg=0, **kwargs):
@@ -163,7 +189,7 @@ class ProjectedGANPairLoss(Loss):
                 gen_img_high, gen_img_low, scale, h_proj, enc, alpha = self.run_G(real_img, gen_z, gen_c, temp_max=warmup)
                 gen_logits = self.run_D(gen_img_high, h_proj, gen_c, scale, alpha, blur_sigma=blur_sigma)
                 loss_Gmain = (-gen_logits).mean()
-                loss_rec = (h_proj - enc.detach()).square().mean()
+                loss_rec = (h_proj - enc.detach()).square().mean() * 0
                 # loss_rec = -((enc @ enc.T) / enc.shape[-1]).log_softmax(dim=-1).diag().mean()
                 # loss_rec = (self.G_ema.synthesis.h_proj(enc) - self.G.synthesis.h_proj(h_proj)).square().mean()
                 # gen_pair_logits = self.run_E(gen_img_low, h_proj, scale)

@@ -3,12 +3,9 @@
 # modified by Axel Sauer for "Projected GANs Converge Faster"
 #
 import torch.nn as nn
-from ddim.models.diffusion import FullyConnectedLayer
 from torch_utils.misc import compute_alpha, get_timestep_embedding, get_beta_schedule
 from pg_modules.blocks import (AttnBlock, BlockBig, DownBlock, InitLayer, UpBlockBig, UpBlockBigCond, UpBlockDenoise, UpBlockSmall, UpBlockSmallCond, SEBlock, conv2d)
 import torch
-
-from pg_modules.diffaug import DiffAugment
 
 def normalize_second_moment(x, dim=1, eps=1e-8):
     return x * (x.square().mean(dim=dim, keepdim=True) + eps).rsqrt()
@@ -264,6 +261,23 @@ class Encoder(nn.Module):
         out = (enc * alpha.sqrt() + noise * (1 - alpha).sqrt())
         # out = enc
         return out, z.unsqueeze(1), t/1000, enc, alpha
+    
+    def sample_noised(self, enc, **kwargs):
+        n = len(enc)
+        t = torch.randint(
+            low=0, high=self.num_timesteps, size=(n // 2 + 1,)
+        ).to(enc.device)
+        t = torch.cat([t, self.num_timesteps - t - 1], dim=0)[:n]
+        temp_min, temp_max = kwargs.get("temp_min", 0.0), kwargs.get("temp_max", 1.0)
+        temp_max = min(temp_max, 0.6)
+        temp_min = min(temp_min, temp_max)
+        t = (t * (temp_max - temp_min) + self.num_timesteps * temp_min).floor().long()
+        alpha = compute_alpha(self.betas, t)
+
+        noise = torch.randn_like(enc, device=enc.device)
+        out = (enc * alpha.sqrt() + noise * (1 - alpha).sqrt())
+        # out = enc
+        return out, t/1000, alpha
 
 class Generator(nn.Module):
     def __init__(
