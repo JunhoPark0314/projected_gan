@@ -278,23 +278,25 @@ class ProjectedPairDiscriminator(torch.nn.Module):
             **backbone_kwargs,
         )
         self.pair_discriminator = MultiScaleD(
-            channels=[f*2 for f in self.feature_network.CHANNELS],
+            channels=[f*2 for f in self.feature_network.CHANNELS][2:],
             # channels=self.feature_network.CHANNELS,
-            resolutions=self.feature_network.RESOLUTIONS,
+            resolutions=self.feature_network.RESOLUTIONS[2:],
             norm='group',
             scond=1,
             **backbone_kwargs,
         )
-        out_ch = 256
+        out_ch = 32
         self.proj = nn.ModuleDict({
-            '0': nn.Conv2d(out_ch, self.feature_network.CHANNELS[0], 1, 1),
-            '1': nn.Conv2d(out_ch, self.feature_network.CHANNELS[1], 1, 1),
+            # '0': nn.Conv2d(out_ch, self.feature_network.CHANNELS[0], 1, 1),
+            # '1': nn.Conv2d(out_ch, self.feature_network.CHANNELS[1], 1, 1),
+            '0': None,
+            '1': None,
             '2': nn.Conv2d(out_ch, self.feature_network.CHANNELS[2], 1, 1),
             '3': nn.Conv2d(out_ch, self.feature_network.CHANNELS[3], 1, 1),
         })
         # self.proj = nn.Conv2d(320, 32, 1, 1)
         self.pair_norm = nn.ModuleDict({
-            str(i): nn.InstanceNorm2d(f, affine=False)
+            str(i): nn.InstanceNorm2d(f, affine=False) if r > 32 else nn.Identity()
             for i, (f, r) in enumerate(zip([24, 40, 112, 320], [112, 56, 28, 14]))
         })
 
@@ -353,13 +355,17 @@ class ProjectedPairDiscriminator(torch.nn.Module):
             alpha = torch.ones((len(x), 1, 1, 1), device=x.device)
 
         alpha = alpha.view(-1, 1, 1, 1)
+        proj_pair_features = {}
+        st = 0
         for k, v in pair_features.items():
-            x1_feat = v * alpha.sqrt() + torch.randn_like(v, device=v.device) * (1 - alpha).sqrt()
-            x2_feat_proj = self.proj[k](x2)
-            x2_feat_proj = torch.nn.functional.interpolate(x2_feat_proj, size=(x1_feat.shape[2], x1_feat.shape[2]), mode='bilinear')
-            pair_features[k] = torch.cat([x1_feat, x2_feat_proj], 1)
+            if self.proj[k] != None:
+                x1_feat = v * alpha.sqrt() + torch.randn_like(v, device=v.device) * (1 - alpha).sqrt()
+                x2_feat_proj = self.proj[k](x2)
+                x2_feat_proj = torch.nn.functional.interpolate(x2_feat_proj, size=(x1_feat.shape[2], x1_feat.shape[2]), mode='bilinear')
+                proj_pair_features[str(st)] = torch.cat([x1_feat, x2_feat_proj], 1)
+                st+=1
 
-        pair_logits = self.pair_discriminator(pair_features, c, semb)
+        pair_logits = self.pair_discriminator(proj_pair_features, c, semb)
         logits = self.discriminator(features, c, semb)
 
         return torch.cat([logits, pair_logits], 1)

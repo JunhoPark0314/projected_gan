@@ -189,7 +189,7 @@ class ProjectedGANPairLoss(Loss):
                 gen_img_high, gen_img_low, scale, h_proj, enc, alpha = self.run_G(real_img, gen_z, gen_c, temp_max=warmup)
                 gen_logits = self.run_D(gen_img_high, h_proj, gen_c, scale, alpha, blur_sigma=blur_sigma)
                 loss_Gmain = (-gen_logits).mean()
-                loss_rec = (h_proj - enc.detach()).square().mean() * 0
+                # loss_rec = (h_proj - enc.detach()).square().mean() * 0
                 # loss_rec = -((enc @ enc.T) / enc.shape[-1]).log_softmax(dim=-1).diag().mean()
                 # loss_rec = (self.G_ema.synthesis.h_proj(enc) - self.G.synthesis.h_proj(h_proj)).square().mean()
                 # gen_pair_logits = self.run_E(gen_img_low, h_proj, scale)

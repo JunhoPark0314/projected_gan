@@ -24,10 +24,12 @@ class FastganSynthesis(nn.Module):
         self.img_resolution = img_resolution
         self.z_dim = z_dim
         self.temb_ch =512
-        self.out_ch = 256
+        self.out_ch = 32
 
         # channel multiplier
-        nfc_multi = {2: 8, 4:8, 8:4, 16:4, 32:2, 64:2, 128:1, 256:0.5,
+        # nfc_multi = {2: 8, 4:8, 8:4, 16:4, 32:2, 64:2, 128:1, 256:0.5,
+        #              512:0.25, 1024:0.125, 2048:0.125}
+        nfc_multi = {2: 16, 4:16, 8:8, 16:4, 32:2, 64:2, 128:1, 256:0.5,
                      512:0.25, 1024:0.125, 2048:0.125}
         nfc = {}
         for k, v in nfc_multi.items():
@@ -209,7 +211,7 @@ class Encoder(nn.Module):
         img_channels,
         hidden_ch = 64,
         z_dim=256,
-		out_ch=256,
+		out_ch=32,
     ):
         super().__init__()
         # self.out_ch = out_ch
