@@ -316,7 +316,7 @@ def compute_feature_stats_for_generator(opts, detector_url, detector_kwargs, rel
                 h_size = opts.ddim.input_size
                 noised_h = torch.randn([batch_gen, *h_size]).to(device=opts.device)
                 h = opts.diffusion.sample(opts.ddim, noised_h)
-                h, scale, alpha = G.mapping.sample_noised(h.to(opts.device), temp_min=0.0, temp_max=0.3)
+                h, scale, alpha = G.mapping.sample_noised(h.to(opts.device), temp_min=0.0, temp_max=0.4)
                 img, _ , _ = G.synthesis(h, z.unsqueeze(1), c=next(c_iter), scale=scale, alpha=alpha, **opts.G_kwargs)
             else:
                 img = G(z=z, c=next(c_iter), **opts.G_kwargs)

@@ -29,7 +29,7 @@ class FastganSynthesis(nn.Module):
         # channel multiplier
         # nfc_multi = {2: 8, 4:8, 8:4, 16:4, 32:2, 64:2, 128:1, 256:0.5,
         #              512:0.25, 1024:0.125, 2048:0.125}
-        nfc_multi = {2: 16, 4:8, 8:8, 16:4, 32:2, 64:2, 128:1, 256:0.5,
+        nfc_multi = {2: 16, 4:8, 8:4, 16:4, 32:2, 64:2, 128:1, 256:0.5,
                      512:0.25, 1024:0.125, 2048:0.125}
         nfc = {}
         for k, v in nfc_multi.items():
@@ -71,6 +71,9 @@ class FastganSynthesis(nn.Module):
         self.h_proj = BlockBig(self.out_ch, nfc[16])
         self.feat_8   = UpBlock(nfc[4], nfc[8])
         self.feat_16  = UpBlock(nfc[8], nfc[16])
+
+        self.proj_16 = nn.Conv2d(nfc[16]*2, nfc[16], 3, 1, 1)
+
         self.feat_32  = UpBlock(nfc[16], nfc[32])
         self.feat_64  = UpBlock(nfc[32], nfc[64])
         self.feat_128 = UpBlock(nfc[64], nfc[128])
@@ -113,7 +116,10 @@ class FastganSynthesis(nn.Module):
 
             feat_4 = self.se_h4(denoised_h, self.init(input))
             feat_8 = self.se_h8(denoised_h, self.feat_8(feat_4))
-            feat_16 = self.feat_16(feat_8) * t_scale_16.sqrt() + self.h_proj(denoised_h) * (1 - t_scale_16).sqrt()
+            # feat_16 = self.feat_16(feat_8) * t_scale_16.sqrt() + self.h_proj(denoised_h) * (1 - t_scale_16).sqrt()
+            h_proj = self.h_proj(denoised_h) * (1 - t_scale_16).sqrt()
+            feat_16 = self.feat_16(feat_8) * t_scale_16.sqrt()
+            feat_16 = self.proj_16(torch.cat([feat_16, h_proj], dim=1))
 
             # feat_16 = self.feat_proj(feat_16)
             feat_32 = self.feat_32(feat_16)
@@ -254,7 +260,7 @@ class Encoder(nn.Module):
         ).to(enc.device)
         t = torch.cat([t, self.num_timesteps - t - 1], dim=0)[:n]
         temp_min, temp_max = kwargs.get("temp_min", 0.0), kwargs.get("temp_max", 1.0)
-        temp_max = min(temp_max, 0.6)
+        temp_max = min(temp_max, 0.4)
         temp_min = min(temp_min, temp_max)
         t = (t * (temp_max - temp_min) + self.num_timesteps * temp_min).floor().long()
         alpha = compute_alpha(self.betas, t)
@@ -271,7 +277,7 @@ class Encoder(nn.Module):
         ).to(enc.device)
         t = torch.cat([t, self.num_timesteps - t - 1], dim=0)[:n]
         temp_min, temp_max = kwargs.get("temp_min", 0.0), kwargs.get("temp_max", 1.0)
-        temp_max = min(temp_max, 0.6)
+        temp_max = min(temp_max, 0.4)
         temp_min = min(temp_min, temp_max)
         t = (t * (temp_max - temp_min) + self.num_timesteps * temp_min).floor().long()
         alpha = compute_alpha(self.betas, t)
