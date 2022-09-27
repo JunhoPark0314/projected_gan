@@ -180,7 +180,7 @@ def training_loop(
         ddim_config = yaml.safe_load(f)
         ddim_config = misc.dict2namespace(ddim_config)
     DDIM = dnnlib.util.construct_class_by_name(class_name="pg_modules.diffusion.Model", config=ddim_config).train().requires_grad_(False).to(device)
-    DDIM_ema = copy.deepcopy(DDIM).eval()
+    DDIM_ema = copy.deepcopy(DDIM).eval().to(device)
     diffusion = dnnlib.util.construct_class_by_name(class_name="torch_utils.light_diffusion.Diffusion", config=ddim_config, args=ddim_args, device=device)
 
     # Check for existing checkpoint
@@ -195,6 +195,7 @@ def training_loop(
             resume_data = legacy.load_network_pkl(f)
         for name, module in [('G_ema', G_ema), ('DDIM', DDIM), ('DDIM_ema', DDIM_ema)]:
             if name in resume_data:
+                print(f"resume {name}")
                 misc.copy_params_and_buffers(resume_data[name], module, require_all=False)
 
         if ckpt_pkl is not None:            # Load ticks
@@ -219,7 +220,7 @@ def training_loop(
     # Distribute across GPUs.
     if rank == 0:
         print(f'Distributing across {num_gpus} GPUs...')
-    for module in [G_ema, DDIM]:
+    for module in [G_ema, DDIM, DDIM_ema]:
         if module is not None and num_gpus > 1:
             for param in misc.params_and_buffers(module):
                 torch.distributed.broadcast(param, src=0)
@@ -227,7 +228,7 @@ def training_loop(
     # Setup training phases.
     if rank == 0:
         print('Setting up training phases...')
-    loss = dnnlib.util.construct_class_by_name(class_name='training.loss.DDIM_Loss', device=device, G_ema=G_ema,DDIM=DDIM, diffusion=diffusion) # subclass of training.loss.Loss
+    loss = dnnlib.util.construct_class_by_name(class_name='training.loss.DDIM_Loss', device=device, G_ema=G_ema, DDIM=DDIM, diffusion=diffusion) # subclass of training.loss.Loss
     phases = []
     for name, module, opt_kwargs, reg_interval in [('DDIM', DDIM, ddim_config.optim, G_reg_interval)]:
         opt = dnnlib.util.construct_class_by_name(params=module.parameters(), **opt_kwargs) # subclass of torch.optim.Optimizer

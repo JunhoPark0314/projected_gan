@@ -38,24 +38,27 @@ def load_network_pkl(f, force_fp16=False):
         data['augment_pipe'] = None
 
     # Validate contents.
-    assert isinstance(data['G'], torch.nn.Module)
-    assert isinstance(data['D'], torch.nn.Module)
-    assert isinstance(data['G_ema'], torch.nn.Module)
-    assert isinstance(data['training_set_kwargs'], (dict, type(None)))
-    assert isinstance(data['augment_pipe'], (torch.nn.Module, type(None)))
+    assert isinstance(data['G'], torch.nn.Module) if 'G' in data else True
+    assert isinstance(data['D'], torch.nn.Module) if 'D' in data else True
+    assert isinstance(data['G_ema'], torch.nn.Module) if 'G_ema' in data else True
+    assert isinstance(data['DDIM'], torch.nn.Module) if 'DDIM' in data else True
+    assert isinstance(data['DDIM_ema'], torch.nn.Module) if 'DDIM_ema' in data else True
+    assert isinstance(data['training_set_kwargs'], (dict, type(None))) if 'training_set_kwargs' in data else True
+    assert isinstance(data['augment_pipe'], (torch.nn.Module, type(None))) if 'augment_pipe' in data else True
 
     # Force FP16.
     if force_fp16:
-        for key in ['G', 'D', 'G_ema']:
-            old = data[key]
-            kwargs = copy.deepcopy(old.init_kwargs)
-            fp16_kwargs = kwargs.get('synthesis_kwargs', kwargs)
-            fp16_kwargs.num_fp16_res = 4
-            fp16_kwargs.conv_clamp = 256
-            if kwargs != old.init_kwargs:
-                new = type(old)(**kwargs).eval().requires_grad_(False)
-                misc.copy_params_and_buffers(old, new, require_all=True)
-                data[key] = new
+        for key in ['G', 'D', 'G_ema', 'DDIM', 'DDIM_ema']:
+            if key in data:
+                old = data[key]
+                kwargs = copy.deepcopy(old.init_kwargs)
+                fp16_kwargs = kwargs.get('synthesis_kwargs', kwargs)
+                fp16_kwargs.num_fp16_res = 4
+                fp16_kwargs.conv_clamp = 256
+                if kwargs != old.init_kwargs:
+                    new = type(old)(**kwargs).eval().requires_grad_(False)
+                    misc.copy_params_and_buffers(old, new, require_all=True)
+                    data[key] = new
     return data
 
 #----------------------------------------------------------------------------

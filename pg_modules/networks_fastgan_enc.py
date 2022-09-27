@@ -105,7 +105,7 @@ class FastganSynthesis(nn.Module):
             t_bias_4 = self.scale_bias_4(temb)[...,None,None]
 
             # denoise step
-            h_8 = self.h_down_8(h.detach())
+            h_8 = self.h_down_8(h)
             h_4 = self.h_down_4(h_8)
             h_4 = self.h_up_4(h_4 + t_bias_4)
             h_8 = self.h_zero(self.h_up_8(h_8 + h_4)) * (1 - alpha).sqrt()
