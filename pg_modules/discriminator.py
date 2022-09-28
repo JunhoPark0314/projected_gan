@@ -285,14 +285,18 @@ class ProjectedPairDiscriminator(torch.nn.Module):
             scond=1,
             **backbone_kwargs,
         )
-        out_ch = 32
+        out_ch = 64
+        def build_proj(f):
+            return nn.Sequential(*[
+                nn.Conv2d(out_ch, f, 3, 1, 1),
+                nn.LeakyReLU(0.2, inplace=True),
+                nn.Conv2d(f, f, 3, 1, 1),
+            ])
         self.proj = nn.ModuleDict({
-            '0': nn.Conv2d(out_ch, self.feature_network.CHANNELS[0], 1, 1),
-            '1': nn.Conv2d(out_ch, self.feature_network.CHANNELS[1], 1, 1),
-            # '0': None,
-            # '1': None,
-            '2': nn.Conv2d(out_ch, self.feature_network.CHANNELS[2], 1, 1),
-            '3': nn.Conv2d(out_ch, self.feature_network.CHANNELS[3], 1, 1),
+            '0': build_proj(self.feature_network.CHANNELS[0]),
+            '1': build_proj(self.feature_network.CHANNELS[1]),
+            '2': build_proj(self.feature_network.CHANNELS[2]),
+            '3': build_proj(self.feature_network.CHANNELS[3]),
         })
         # self.proj = nn.Conv2d(320, 32, 1, 1)
         self.pair_norm = nn.ModuleDict({
@@ -361,8 +365,8 @@ class ProjectedPairDiscriminator(torch.nn.Module):
             if self.proj[k] != None:
                 x1_feat = v * alpha.sqrt() + torch.randn_like(v, device=v.device) * (1 - alpha).sqrt()
                 # x1_feat = v
-                x2_feat_proj = self.proj[k](x2)
-                x2_feat_proj = torch.nn.functional.interpolate(x2_feat_proj, size=(x1_feat.shape[2], x1_feat.shape[2]), mode='bilinear')
+                x2_feat_proj = torch.nn.functional.interpolate(x2, size=(x1_feat.shape[2], x1_feat.shape[2]), mode='bilinear')
+                x2_feat_proj = self.proj[k](x2_feat_proj)
                 proj_pair_features[str(st)] = torch.cat([x1_feat, x2_feat_proj], 1)
                 st+=1
 
