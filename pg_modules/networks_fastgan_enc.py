@@ -220,17 +220,7 @@ class Encoder(nn.Module):
 		out_ch=32,
     ):
         super().__init__()
-        # self.out_ch = out_ch
-        num_layer = int(np.log2(img_resolution)) - 4
         self.layers = []
-        in_ch = img_channels
-        # hidden_ch = hidden_ch
-
-        self.out_ch = out_ch
-        for i in range(num_layer):
-            self.layers.append(DownBlock(in_ch, hidden_ch))
-            in_ch = hidden_ch
-        self.layers.append(nn.Conv2d(hidden_ch, out_ch, 1, 1))
         self.layers.append(nn.InstanceNorm2d(out_ch, affine=False))
         self.layers = nn.Sequential(*self.layers)
 
@@ -252,7 +242,8 @@ class Encoder(nn.Module):
         self.register_buffer("betas", torch.tensor(betas).float())
 
     def forward(self, x, z, c, **kwargs):
-        enc = self.layers(x)
+        enc = self.encode(x)
+        enc = self.layers(enc)
 
         n = len(enc)
         t = torch.randint(

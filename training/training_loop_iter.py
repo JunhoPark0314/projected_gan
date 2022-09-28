@@ -168,6 +168,15 @@ def training_loop(
     # G.mapping.feature_network = D.feature_network
     G_ema = copy.deepcopy(G).eval()
 
+    import yaml
+    ddim_config = "256.yml"
+    ddim_args = misc.dict2namespace(ddim_args)
+    with open(os.path.join("configs", ddim_config), "r") as f:
+        ddim_config = yaml.safe_load(f)
+        ddim_config = misc.dict2namespace(ddim_config)
+    encode = dnnlib.util.construct_class_by_name(class_name="pg_modules.diffusion.Encoder", config=ddim_config).train().requires_grad_(False).to(device)
+    G.mapping.encode = encode
+
     # Check for existing checkpoint
     ckpt_pkl = None
     if restart_every > 0 and os.path.isfile(misc.get_ckpt_path(run_dir)):
