@@ -165,17 +165,17 @@ def training_loop(
     common_kwargs = dict(c_dim=training_set.label_dim, img_resolution=training_set.resolution, img_channels=training_set.num_channels)
     G = dnnlib.util.construct_class_by_name(**G_kwargs, **common_kwargs).train().requires_grad_(False).to(device) # subclass of torch.nn.Module
     D = dnnlib.util.construct_class_by_name(**D_kwargs, **common_kwargs).train().requires_grad_(False).to(device) # subclass of torch.nn.Module
-    # G.mapping.feature_network = D.feature_network
-    G_ema = copy.deepcopy(G).eval()
-
     import yaml
-    ddim_config = "256.yml"
-    ddim_args = misc.dict2namespace(ddim_args)
+    ddim_config = f"{training_set.resolution}.yml"
     with open(os.path.join("configs", ddim_config), "r") as f:
         ddim_config = yaml.safe_load(f)
         ddim_config = misc.dict2namespace(ddim_config)
     encode = dnnlib.util.construct_class_by_name(class_name="pg_modules.diffusion.Encoder", config=ddim_config).train().requires_grad_(False).to(device)
     G.mapping.encode = encode
+    # G.mapping.feature_network = D.feature_network
+    G_ema = copy.deepcopy(G).eval()
+
+
 
     # Check for existing checkpoint
     ckpt_pkl = None

@@ -29,7 +29,7 @@ class FastganSynthesis(nn.Module):
         # channel multiplier
         # nfc_multi = {2: 8, 4:8, 8:4, 16:4, 32:2, 64:2, 128:1, 256:0.5,
         #              512:0.25, 1024:0.125, 2048:0.125}
-        nfc_multi = {2: 16, 4:8, 8:4, 16:4, 32:2, 64:2, 128:1, 256:0.5,
+        nfc_multi = {2: 16, 4:16, 8:8, 16:4, 32:2, 64:2, 128:1, 256:0.5,
                      512:0.25, 1024:0.125, 2048:0.125}
         nfc = {}
         for k, v in nfc_multi.items():
@@ -221,8 +221,10 @@ class Encoder(nn.Module):
     ):
         super().__init__()
         self.layers = []
-        self.layers.append(nn.InstanceNorm2d(out_ch, affine=False))
+        # self.layers.append(nn.InstanceNorm2d(out_ch, affine=False))
+        self.layers.append(nn.BatchNorm2d(out_ch))
         self.layers = nn.Sequential(*self.layers)
+        self.out_ch = out_ch
 
         # self.flt_out = nn.Sequential(*[
         #     nn.Linear(8*8*out_ch, z_dim*2),
