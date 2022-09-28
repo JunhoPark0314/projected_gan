@@ -38,7 +38,7 @@
 				"--data",
 				"datasets/art-painting/art-painting-1k-128x128.zip",
 				// "--gpus", "4",
-				// "--batch", "128",
+				// "--batch", "256",
 				"--gpus",
 				"1",
 				"--batch",
@@ -49,6 +49,38 @@
 				"100",
 				"--restart_every",
 				"0"
+			]
+		},
+		{
+			"name": "Train Diffusion",
+			"type": "python",
+			"request": "launch",
+			"program": "train_iter_ddim.py",
+			"console": "integratedTerminal",
+			"justMyCode": true,
+			"args": [
+				"--outdir",
+				"output/debug",
+				"--cfg",
+				"fastgan_enc",
+				"--data",
+				"datasets/art-painting/art-painting-1k-256x256.zip",
+				// "--gpus",
+				// "1",
+				// "--batch",
+				// "32",
+				"--gpus",
+				"4",
+				"--batch",
+				"128",
+				"--mirror",
+				"1",
+				"--snap",
+				"100",
+				"--restart_every",
+				"0",
+				"--resume",
+				"output/denoise/00004-fastgan_enc-art-painting-1k-256x256-gpus4-batch128/network-snapshot.pkl"
 			]
 		},
 	]
