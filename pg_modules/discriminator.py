@@ -277,21 +277,22 @@ class ProjectedPairDiscriminator(torch.nn.Module):
             resolutions=self.feature_network.RESOLUTIONS,
             **backbone_kwargs,
         )
+        out_ch = 64
         self.pair_discriminator = MultiScaleD(
-            channels=[f*2 for f in self.feature_network.CHANNELS],
+            channels=[f + out_ch for f in self.feature_network.CHANNELS],
             # channels=self.feature_network.CHANNELS,
             resolutions=self.feature_network.RESOLUTIONS,
-            norm='group',
+            # norm='group',
             scond=1,
             **backbone_kwargs,
         )
-        out_ch = 64
         def build_proj(f):
-            return nn.Sequential(*[
-                nn.Conv2d(out_ch, f, 3, 1, 1),
-                nn.LeakyReLU(0.2, inplace=True),
-                nn.Conv2d(f, f, 3, 1, 1),
-            ])
+            # return nn.Sequential(*[
+            #     nn.Conv2d(out_ch, f, 3, 1, 1),
+            #     nn.LeakyReLU(0.2, inplace=True),
+            #     nn.Conv2d(f, f, 3, 1, 1),
+            # ])
+            return nn.Identity()
         self.proj = nn.ModuleDict({
             '0': build_proj(self.feature_network.CHANNELS[0]),
             '1': build_proj(self.feature_network.CHANNELS[1]),
@@ -300,7 +301,7 @@ class ProjectedPairDiscriminator(torch.nn.Module):
         })
         # self.proj = nn.Conv2d(320, 32, 1, 1)
         self.pair_norm = nn.ModuleDict({
-            str(i): nn.InstanceNorm2d(f, affine=False)
+            str(i): nn.GroupNorm(f//4,f, affine=False)
             for i, (f, r) in enumerate(zip([24, 40, 112, 320], [112, 56, 28, 14]))
         })
 
