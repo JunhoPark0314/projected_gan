@@ -142,8 +142,8 @@ class ProjectedGANPairLoss(Loss):
         #     h, ws, scale, enc = self.G_ema.mapping(real_img, z, c, temp_max=temp_max, update_emas=update_emas)
         # else:
         h, ws, scale, enc, alpha = self.G.mapping(real_img, z, c, temp_max=temp_max, update_emas=update_emas)
-        high, low, _ = self.G.synthesis(h, ws, c, scale, alpha, update_emas=False)
-        return high, low, scale.squeeze()[:,None], h, enc, alpha
+        high, low, h_proj = self.G.synthesis(h, ws, c, scale, alpha, update_emas=False)
+        return high, low, scale.squeeze()[:,None], h_proj, enc, alpha
 
     def run_D(self, x, h, c, scale, alpha, blur_sigma=0, update_emas=False):
         logits = self.D(x, h.detach(), c, scale, alpha)

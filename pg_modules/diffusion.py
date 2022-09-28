@@ -417,7 +417,7 @@ class Encoder(nn.Module):
                                        out_channels=block_in,
                                        temb_channels=self.temb_ch,
                                        dropout=dropout)
-        self.mid.attn_1 = AttnBlock(block_in)
+        # self.mid.attn_1 = AttnBlock(block_in)
         self.mid.block_2 = ResnetBlock(in_channels=block_in,
                                        out_channels=block_in,
                                        temb_channels=self.temb_ch,
@@ -449,7 +449,7 @@ class Encoder(nn.Module):
         # middle
         h = hs[-1]
         h = self.mid.block_1(h, temb)
-        h = self.mid.attn_1(h)
+        # h = self.mid.attn_1(h)
         h = self.mid.block_2(h, temb)
 
         # end
