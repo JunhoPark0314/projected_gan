@@ -135,7 +135,7 @@ class ProjectedGANPairLoss(Loss):
         self.D = D
         self.blur_init_sigma = blur_init_sigma
         self.blur_fade_kimg = blur_fade_kimg
-        self.warmup_nimg = 20 * 2**12
+        self.warmup_nimg = 35 * 2**12
 
     def run_G(self, real_img, z, c, update_emas=False, temp_max=1.0):
         # if use_ema:
@@ -143,10 +143,10 @@ class ProjectedGANPairLoss(Loss):
         # else:
         h, ws, scale, enc, alpha = self.G.mapping(real_img, z, c, temp_max=temp_max, update_emas=update_emas)
         high, low, h_proj = self.G.synthesis(h, ws, c, scale, alpha, update_emas=False)
-        return high, low, scale.squeeze()[:,None], h_proj, enc, alpha
+        return high, low, scale.squeeze()[:,None], h.detach(), enc, alpha
 
     def run_D(self, x, h, c, scale, alpha, blur_sigma=0, update_emas=False):
-        logits = self.D(x, h.detach(), c, scale, alpha)
+        logits = self.D(x, h, c, scale, alpha)
         return logits
     
     def run_E(self, img1, img2, scale=None, blur_sigma=1):
@@ -176,7 +176,7 @@ class ProjectedGANPairLoss(Loss):
         loss_Dgen = 0
         loss_rec = 0
 
-        warmup = min(max(min((cur_nimg - self.warmup_nimg) / (self.warmup_nimg * 4), 1), 0.2), 0.9)
+        warmup = min(max(min((cur_nimg - self.warmup_nimg) / (self.warmup_nimg * 4), 1), 0.3), 0.9)
         # warmup = 1
 
         # real_img_low = torch.nn.functional.interpolate(real_img, size=(32, 32), mode='bilinear')
