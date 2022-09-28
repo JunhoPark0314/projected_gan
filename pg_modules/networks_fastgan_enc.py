@@ -221,6 +221,7 @@ class Encoder(nn.Module):
     ):
         super().__init__()
         self.layers = []
+        self.out_ch = out_ch
         self.layers.append(nn.InstanceNorm2d(out_ch, affine=False))
         self.layers = nn.Sequential(*self.layers)
 
