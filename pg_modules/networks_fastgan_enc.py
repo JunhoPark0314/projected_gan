@@ -70,11 +70,12 @@ class FastganSynthesis(nn.Module):
         nn.init.constant_(self.h_zero.weight, 0)
 
         # self.feat_proj = BlockBig(nfc[16], nfc[16])
-        self.h_proj = BlockBig(self.out_ch, nfc[16])
+        self.h_proj = BlockBig(self.out_ch, nfc[32])
         self.feat_8   = UpBlock(nfc[4], nfc[8])
         self.feat_16  = UpBlock(nfc[8], nfc[16])
 
-        self.proj_16 = nn.Conv2d(nfc[16]*2, nfc[16], 3, 1, 1)
+        # self.proj_16 = nn.Conv2d(nfc[16]*2, nfc[16], 3, 1, 1)
+        self.proj_32 = nn.Conv2d(nfc[32]*2, nfc[32], 3, 1, 1)
 
         self.feat_32  = UpBlock(nfc[16], nfc[32])
         self.feat_64  = UpBlock(nfc[32], nfc[64])
@@ -84,6 +85,7 @@ class FastganSynthesis(nn.Module):
         self.se_init = SEBlock(self.out_ch, nfc[8])
         self.se_h4 = SEBlock(self.out_ch, nfc[4])
         self.se_h8 = SEBlock(self.out_ch, nfc[8])
+        self.se_h16 = SEBlock(self.out_ch, nfc[16])
 
         self.se_64  = SEBlock(nfc[4], nfc[64])
         self.se_128 = SEBlock(nfc[8], nfc[128])
@@ -115,16 +117,18 @@ class FastganSynthesis(nn.Module):
             h_4 = self.h_up_4(h_4 + t_bias_4)
             h_8 = self.h_zero(self.h_up_8(h_8 + h_4)) * (1 - alpha).sqrt()
             denoised_h = (h + h_8) / alpha.sqrt()
+            h_proj = self.h_proj(denoised_h) * (1 - t_scale_16).sqrt()
 
             feat_4 = self.se_h4(denoised_h, self.init(input))
             feat_8 = self.se_h8(denoised_h, self.feat_8(feat_4))
+            feat_16 = self.se_h16(denoised_h, self.feat_16(feat_8))
             # feat_16 = self.feat_16(feat_8) * t_scale_16.sqrt() + self.h_proj(denoised_h) * (1 - t_scale_16).sqrt()
-            h_proj = self.h_proj(denoised_h) * (1 - t_scale_16).sqrt()
-            feat_16 = self.feat_16(feat_8) * t_scale_16.sqrt()
-            feat_16 = self.proj_16(torch.cat([feat_16, h_proj], dim=1))
+            # feat_16 = self.feat_16(feat_8) * t_scale_16.sqrt()
+            # feat_16 = self.proj_16(torch.cat([feat_16, h_proj], dim=1))
 
             # feat_16 = self.feat_proj(feat_16)
-            feat_32 = self.feat_32(feat_16)
+            feat_32 = self.feat_32(feat_16) * t_scale_16.sqrt()
+            feat_32 = self.proj_32(torch.cat([feat_32, h_proj], dim=1))
 
             feat_64 = self.se_64(feat_4, self.feat_64(feat_32))
             feat_128 = self.se_128(feat_8,  self.feat_128(feat_64))
@@ -256,7 +260,7 @@ class Encoder(nn.Module):
         ).to(enc.device)
         t = torch.cat([t, self.num_timesteps - t - 1], dim=0)[:n]
         temp_min, temp_max = kwargs.get("temp_min", 0.0), kwargs.get("temp_max", 1.0)
-        temp_max = min(temp_max, 0.4)
+        temp_max = min(temp_max, 0.1)
         temp_min = min(temp_min, temp_max)
         t = (t * (temp_max - temp_min) + self.num_timesteps * temp_min).floor().long()
         alpha = compute_alpha(self.betas, t)
