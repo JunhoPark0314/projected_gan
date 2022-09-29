@@ -74,7 +74,7 @@ class FastganSynthesis(nn.Module):
         self.feat_8   = UpBlock(nfc[4], nfc[8])
         self.feat_16  = UpBlock(nfc[8], nfc[16])
 
-        self.proj_16 = nn.Conv2d(nfc[16]*2, nfc[16], 3, 1, 1)
+        # self.proj_16 = nn.Conv2d(nfc[16]*2, nfc[16], 3, 1, 1)
 
         self.feat_32  = UpBlock(nfc[16], nfc[32])
         self.feat_64  = UpBlock(nfc[32], nfc[64])
@@ -121,7 +121,8 @@ class FastganSynthesis(nn.Module):
             # feat_16 = self.feat_16(feat_8) * t_scale_16.sqrt() + self.h_proj(denoised_h) * (1 - t_scale_16).sqrt()
             h_proj = self.h_proj(denoised_h) * (1 - t_scale_16).sqrt()
             feat_16 = self.feat_16(feat_8) * t_scale_16.sqrt()
-            feat_16 = self.proj_16(torch.cat([feat_16, h_proj], dim=1))
+            feat_16 += h_proj
+            # feat_16 = self.proj_16(torch.cat([feat_16, h_proj], dim=1))
 
             # feat_16 = self.feat_proj(feat_16)
             feat_32 = self.feat_32(feat_16)
