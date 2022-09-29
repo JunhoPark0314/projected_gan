@@ -279,7 +279,7 @@ class ProjectedPairDiscriminator(torch.nn.Module):
         )
         out_ch = 64
         self.pair_discriminator = MultiScaleD(
-            channels=[f + out_ch for f in self.feature_network.CHANNELS],
+            channels=[f * 2 for f in self.feature_network.CHANNELS],
             # channels=self.feature_network.CHANNELS,
             resolutions=self.feature_network.RESOLUTIONS,
             # norm='group',

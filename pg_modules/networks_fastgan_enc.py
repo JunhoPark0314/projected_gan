@@ -61,8 +61,8 @@ class FastganSynthesis(nn.Module):
 
         UpBlock = UpBlockSmall if lite else UpBlockBig
 
-        self.h_down_8 = DownBlock(self.out_ch, nfc[16], norm='group')
-        self.h_down_4 = DownBlock(nfc[16], nfc[8], norm='group')
+        self.h_down_8 = DownBlock(self.out_ch, nfc[16])
+        self.h_down_4 = DownBlock(nfc[16], nfc[8])
 
         self.h_up_4 = UpBlockDenoise(nfc[8], nfc[16])
         self.h_up_8 = UpBlockDenoise(nfc[16], self.out_ch)
@@ -74,7 +74,7 @@ class FastganSynthesis(nn.Module):
         self.feat_8   = UpBlock(nfc[4], nfc[8])
         self.feat_16  = UpBlock(nfc[8], nfc[16])
 
-        # self.proj_16 = nn.Conv2d(nfc[16]*2, nfc[16], 3, 1, 1)
+        self.proj_16 = nn.Conv2d(nfc[16] * 2, nfc[16], 3, 1, 1)
 
         self.feat_32  = UpBlock(nfc[16], nfc[32])
         self.feat_64  = UpBlock(nfc[32], nfc[64])
@@ -82,8 +82,8 @@ class FastganSynthesis(nn.Module):
         self.feat_256 = UpBlock(nfc[128], nfc[256])
 
         self.se_init = SEBlock(self.out_ch, nfc[8])
-        self.se_h4 = SEBlock(self.out_ch, nfc[4])
-        self.se_h8 = SEBlock(self.out_ch, nfc[8])
+        self.se_h4 = SEBlock(nfc[4], nfc[16])
+        self.se_h8 = SEBlock(nfc[8], self.out_ch)
 
         self.se_64  = SEBlock(nfc[4], nfc[64])
         self.se_128 = SEBlock(nfc[8], nfc[128])
@@ -109,20 +109,24 @@ class FastganSynthesis(nn.Module):
             t_scale_16 = self.scale_bias_16(temb)[...,None,None].sigmoid()
             t_bias_4 = self.scale_bias_4(temb)[...,None,None]
 
+            feat_4 = self.init(input)
+            feat_8 = self.feat_8(feat_4)
+
             # denoise step
             h_8 = self.h_down_8(h)
             h_4 = self.h_down_4(h_8)
-            h_4 = self.h_up_4(h_4 + t_bias_4)
-            h_8 = self.h_zero(self.h_up_8(h_8 + h_4)) * (1 - alpha).sqrt()
+            h_4 = self.se_h4(feat_4, self.h_up_4(h_4 + t_bias_4))
+            h_8 = self.se_h8(feat_8, self.h_up_8(h_8 + h_4))
+            h_8 = self.h_zero(h_8) * (1 - alpha).sqrt()
             denoised_h = (h + h_8) / alpha.sqrt()
 
-            feat_4 = self.se_h4(denoised_h, self.init(input))
-            feat_8 = self.se_h8(denoised_h, self.feat_8(feat_4))
+            # feat_4 = self.se_h4(denoised_h, self.init(input))
+            # feat_8 = self.se_h8(denoised_h, self.feat_8(feat_4))
             # feat_16 = self.feat_16(feat_8) * t_scale_16.sqrt() + self.h_proj(denoised_h) * (1 - t_scale_16).sqrt()
             h_proj = self.h_proj(denoised_h) * (1 - t_scale_16).sqrt()
             feat_16 = self.feat_16(feat_8) * t_scale_16.sqrt()
-            feat_16 += h_proj
-            # feat_16 = self.proj_16(torch.cat([feat_16, h_proj], dim=1))
+            # feat_16 += h_proj
+            feat_16 = self.proj_16(torch.cat([feat_16, h_proj], dim=1))
 
             # feat_16 = self.feat_proj(feat_16)
             feat_32 = self.feat_32(feat_16)
