@@ -29,7 +29,8 @@ class DDIM_Loss(Loss):
 
     def run_G(self, real_img, update_emas=False):
         t = self.diffusion.sample_timestep(len(real_img))
-        h = self.G_ema.mapping.layers(real_img)
+        h = self.G_ema.mapping.encode(real_img)
+        h = self.G_ema.mapping.layers(h)
         h_noised, eps, alpha = self.diffusion.sample_noised(h, t)
         trg_eps = self.DDIM(h_noised, t.float())
         return trg_eps, eps, alpha
