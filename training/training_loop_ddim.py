@@ -164,6 +164,14 @@ def training_loop(
         print('Constructing networks...')
     common_kwargs = dict(c_dim=training_set.label_dim, img_resolution=training_set.resolution, img_channels=training_set.num_channels)
     G_ema = dnnlib.util.construct_class_by_name(**G_kwargs, **common_kwargs).eval().requires_grad_(False).to(device) # subclass of torch.nn.Module
+    import yaml
+    ddim_config = "64.yml"
+    with open(os.path.join("configs", ddim_config), "r") as f:
+        ddim_config = yaml.safe_load(f)
+        ddim_config = misc.dict2namespace(ddim_config)
+    encode = dnnlib.util.construct_class_by_name(class_name="pg_modules.diffusion.Encoder", config=ddim_config).eval().requires_grad_(False).to(device)
+    G_ema.mapping.encode = encode
+
     # D = dnnlib.util.construct_class_by_name(**D_kwargs, **common_kwargs).train().requires_grad_(False).to(device) # subclass of torch.nn.Module
     # G.mapping.feature_network = D.feature_network
 
@@ -214,7 +222,8 @@ def training_loop(
         c = torch.empty([batch_gpu, G_ema.c_dim], device=device)
         img = misc.print_module_summary(G_ema, [x, z, c])
         t = torch.randint(0, ddim_config.diffusion.num_diffusion_timesteps,[batch_gpu], device=device)
-        z = G_ema.mapping.layers(img)
+        z = G_ema.mapping.encode(img)
+        z = G_ema.mapping.layers(z)
         misc.print_module_summary(DDIM, [z ,t])
 
     # Distribute across GPUs.
@@ -428,7 +437,8 @@ def training_loop(
         # Save network snapshot.
         snapshot_pkl = None
         snapshot_data = None
-        if (network_snapshot_ticks is not None) and (done or cur_tick % network_snapshot_ticks == 0):
+        # if (network_snapshot_ticks is not None) and (done or cur_tick % network_snapshot_ticks == 0):
+        if (network_snapshot_ticks is not None) and (done or cur_tick % 200 == 0):
             snapshot_data = dict(G_ema=G_ema, DDIM=DDIM, DDIM_ema=DDIM_ema, training_set_kwargs=dict(training_set_kwargs))
             for key, value in snapshot_data.items():
                 if isinstance(value, torch.nn.Module):
@@ -437,7 +447,8 @@ def training_loop(
 
         # Save Checkpoint if needed
         if (rank == 0) and (restart_every > 0) and (network_snapshot_ticks is not None) and (
-                done or cur_tick % network_snapshot_ticks == 0):
+                # done or cur_tick % network_snapshot_ticks == 0):
+                done or cur_tick % 200 == 0):
             snapshot_pkl = misc.get_ckpt_path(run_dir)
             # save as tensors to avoid error for multi GPU
             snapshot_data['progress'] = {
@@ -452,9 +463,12 @@ def training_loop(
             with open(snapshot_pkl, 'wb') as f:
                 pickle.dump(snapshot_data, f)
 
+            with open(snapshot_pkl + f'_{cur_tick}', 'wb') as f:
+                pickle.dump(snapshot_data, f)
+
         # Evaluate metrics.
         # if (snapshot_data is not None) and (len(metrics) > 0):
-        if cur_tick and (snapshot_data is not None) and (len(metrics) > 0):
+        if cur_tick and (snapshot_data is not None) and (len(metrics) > 0) and (cur_tick % network_snapshot_ticks == 0):
             if rank == 0:
                 print('Evaluating metrics...')
             for metric in metrics:

@@ -1,7 +1,7 @@
 data:
     dataset: "LATENT"
     image_size: 16
-    channels: 256
+    channels: 64
     logit_transform: false
     uniform_dequantization: false
     gaussian_dequantization: false
@@ -11,11 +11,11 @@ data:
 
 model:
     type: "simple"
-    in_channels: 256
-    out_ch: 256
+    in_channels: 64
+    out_ch: 64
     ch: 256
-    ch_mult: [2, 4, 4]
-    num_res_blocks: 2
+    ch_mult: [1, 2, 4]
+    num_res_blocks: 3
     attn_resolutions: []
     dropout: 0.1
     var_type: fixedlarge

@@ -233,6 +233,8 @@ def compute_feature_stats_for_dataset(opts, detector_url, detector_kwargs, rel_l
         cache_file = os.path.join('.', 'dnnlib', 'gan-metrics', cache_tag + '.pkl')
         # cache_file = dnnlib.make_cache_dir_path('gan-metrics', cache_tag + '.pkl')
 
+        cache_file = "./dnnlib/gan-metrics/imagenet_64-1m-inception-2015-12-05-1f7b1e8ac1ea52d36d17d7c7db93c125.pkl"
+
         # Check if the file exists (all processes must agree).
         flag = os.path.isfile(cache_file) if opts.rank == 0 else False
         if opts.num_gpus > 1:
@@ -282,6 +284,7 @@ def compute_feature_stats_for_dataset(opts, detector_url, detector_kwargs, rel_l
 def compute_feature_stats_for_generator(opts, detector_url, detector_kwargs, rel_lo=0, rel_hi=1, batch_size=64, batch_gen=None, swav=False, sfid=False, **stats_kwargs):
     if batch_gen is None:
         batch_gen = min(batch_size, 4)
+    batch_gen = 16
     assert batch_size % batch_gen == 0
 
     # Setup generator and labels.
@@ -313,10 +316,11 @@ def compute_feature_stats_for_generator(opts, detector_url, detector_kwargs, rel
                 real_img = (real_img.to(opts.device).to(torch.float32) / 127.5 - 1)
                 img = G(x=real_img, z=z, c=next(c_iter), temp_min=0.0, temp_max=0.3, **opts.G_kwargs)
             elif (opts.diffusion is not None) and (opts.ddim is not None):
+                opts.diffusion.args.timesteps = 100
                 h_size = opts.ddim.input_size
                 noised_h = torch.randn([batch_gen, *h_size]).to(device=opts.device)
                 h = opts.diffusion.sample(opts.ddim, noised_h)
-                h, scale, alpha = G.mapping.sample_noised(h.to(opts.device), temp_min=0.0, temp_max=0.4)
+                h, scale, alpha = G.mapping.sample_noised(h.to(opts.device), temp_min=0.0, temp_max=0.2)
                 img, _ , _ = G.synthesis(h, z.unsqueeze(1), c=next(c_iter), scale=scale, alpha=alpha, **opts.G_kwargs)
             else:
                 img = G(z=z, c=next(c_iter), **opts.G_kwargs)

@@ -29,7 +29,8 @@ class DDIM_Loss(Loss):
 
     def run_G(self, real_img, update_emas=False):
         t = self.diffusion.sample_timestep(len(real_img))
-        h = self.G_ema.mapping.layers(real_img)
+        h = self.G_ema.mapping.encode(real_img)
+        h = self.G_ema.mapping.layers(h)
         h_noised, eps, alpha = self.diffusion.sample_noised(h, t)
         trg_eps = self.DDIM(h_noised, t.float())
         return trg_eps, eps, alpha
@@ -39,7 +40,8 @@ class DDIM_Loss(Loss):
         # Gmain: Maximize logits for generated images.
         with torch.autograd.profiler.record_function('Gmain_forward'):
             pred_eps, trg_eps, alpha = self.run_G(real_img)
-            loss_Rec = (pred_eps - trg_eps).square().sum([1,2,3]).mean()
+            # loss_Rec = (pred_eps - trg_eps).square().sum([1,2,3]).mean()
+            loss_Rec = (pred_eps - trg_eps).abs().sum([1,2,3]).mean()
             # Logging
             training_stats.report('Loss/DDIM/loss_rec', loss_Rec)
 
@@ -135,7 +137,7 @@ class ProjectedGANPairLoss(Loss):
         self.D = D
         self.blur_init_sigma = blur_init_sigma
         self.blur_fade_kimg = blur_fade_kimg
-        self.warmup_nimg = 20 * 2**12
+        self.warmup_nimg = 40 * 2**12
 
     def run_G(self, real_img, z, c, update_emas=False, temp_max=1.0):
         # if use_ema:
@@ -176,7 +178,7 @@ class ProjectedGANPairLoss(Loss):
         loss_Dgen = 0
         loss_rec = 0
 
-        warmup = min(max(min((cur_nimg - self.warmup_nimg) / (self.warmup_nimg * 4), 1), 0.2), 0.9)
+        warmup = min(max(min((cur_nimg - self.warmup_nimg) / (self.warmup_nimg * 4), 1), 0.1), 0.9)
         # warmup = 1
 
         # real_img_low = torch.nn.functional.interpolate(real_img, size=(32, 32), mode='bilinear')

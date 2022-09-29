@@ -26,6 +26,9 @@ import click
 import numpy as np
 import PIL.Image
 from tqdm import tqdm
+from PIL import PngImagePlugin
+LARGE_ENOUGH_NUMBER = 1000
+PngImagePlugin.MAX_TEXT_CHUNK = LARGE_ENOUGH_NUMBER * (1024**2)
 
 #----------------------------------------------------------------------------
 

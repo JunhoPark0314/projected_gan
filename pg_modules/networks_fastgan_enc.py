@@ -24,12 +24,12 @@ class FastganSynthesis(nn.Module):
         self.img_resolution = img_resolution
         self.z_dim = z_dim
         self.temb_ch =512
-        self.out_ch = 32
+        self.out_ch = 64
 
         # channel multiplier
         # nfc_multi = {2: 8, 4:8, 8:4, 16:4, 32:2, 64:2, 128:1, 256:0.5,
         #              512:0.25, 1024:0.125, 2048:0.125}
-        nfc_multi = {2: 16, 4:8, 8:4, 16:4, 32:2, 64:2, 128:1, 256:0.5,
+        nfc_multi = {2: 16, 4:16, 8:8, 16:4, 32:2, 64:2, 128:1, 256:0.5,
                      512:0.25, 1024:0.125, 2048:0.125}
         nfc = {}
         for k, v in nfc_multi.items():
@@ -125,10 +125,11 @@ class FastganSynthesis(nn.Module):
             feat_32 = self.feat_32(feat_16)
 
             feat_64 = self.se_64(feat_4, self.feat_64(feat_32))
-            feat_128 = self.se_128(feat_8,  self.feat_128(feat_64))
+            feat_last = feat_64
+
 
             if self.img_resolution >= 128:
-                feat_last = feat_128
+                feat_last = self.se_128(feat_8,  self.feat_128(feat_64))
 
             if self.img_resolution >= 256:
                 feat_last = self.se_256(feat_16, self.feat_256(feat_last))
@@ -217,12 +218,14 @@ class Encoder(nn.Module):
         img_channels,
         hidden_ch = 64,
         z_dim=256,
-		out_ch=32,
+		out_ch=64,
     ):
         super().__init__()
         self.layers = []
         self.out_ch = out_ch
-        self.layers.append(nn.InstanceNorm2d(out_ch, affine=False))
+        # self.layers.append(nn.InstanceNorm2d(out_ch, affine=False))
+        # self.layers.append(nn.BatchNorm2d(out_ch))
+        self.layers.append(nn.GroupNorm(16, out_ch, affine=False))
         self.layers = nn.Sequential(*self.layers)
 
         # self.flt_out = nn.Sequential(*[

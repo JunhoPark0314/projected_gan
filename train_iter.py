@@ -23,6 +23,9 @@ from torch_utils import training_stats
 from torch_utils import custom_ops
 from torch_utils import misc
 
+from PIL import PngImagePlugin
+LARGE_ENOUGH_NUMBER = 1000
+PngImagePlugin.MAX_TEXT_CHUNK = LARGE_ENOUGH_NUMBER * (1024**2)
 
 def subprocess_fn(rank, c, temp_dir):
     dnnlib.util.Logger(file_name=os.path.join(c.run_dir, 'log.txt'), file_mode='a', should_flush=True)

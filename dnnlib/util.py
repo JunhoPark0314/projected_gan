@@ -110,6 +110,8 @@ class Logger(object):
         if self.file is not None:
             self.file.close()
             self.file = None
+    def isatty(self):
+        return True
 
 
 # Cache directories
